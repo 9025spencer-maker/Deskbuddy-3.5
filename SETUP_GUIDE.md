@@ -28,6 +28,8 @@ After installation, select the board that best matches your hardware under:
 
 If you are unsure which profile to use, start with the closest ESP32 option and adjust if needed.
 
+This was tested and worked for an **ESP32-WROOM-DA MODULE**
+
 ## 2. Install Required Libraries
 
 Open:
