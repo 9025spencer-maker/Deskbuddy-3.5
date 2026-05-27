@@ -1,7 +1,6 @@
-//#define ILI9341_DRIVER
-#define ST7789_DRIVER
-#define TFT_WIDTH 240
-#define TFT_HEIGHT 320
+#define ILI9488_DRIVER
+#define TFT_WIDTH 320
+#define TFT_HEIGHT 480
 
 
 //Had to change RGB Order
