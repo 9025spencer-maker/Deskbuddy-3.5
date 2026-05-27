@@ -1,30 +1,29 @@
 // Deskbuddy V.8
 // Nav: Home / Weather / Notes / Status
-// Full version
-// - KP dots replaced with Low / Medium / High / Extreme text
-// - KP level text uses same small font as wind direction and stays inside the box
-// - Wind + direction added to Weather page
-// - Wind direction uses Accent color
-// - Weather sun event field automatically shows Sunrise or Sunset, whichever is next
-// - Uptime added to Status page
+// Full version - Refactored for 320x480 Display Layout
 
+// 1. Core ESP32 & Network Libraries
 #include <WiFi.h>
-#include <HTTPClient.h>
 #include <WiFiClientSecure.h>
-#include <TFT_eSPI.h>
-#include <time.h>
-#include <ArduinoJson.h>
+#include <HTTPClient.h>
 #include <WebServer.h>
-#include <Preferences.h>
-#include <SPI.h>
-#include <XPT2046_Touchscreen.h>
+
+// 2. Standard C++ & Utility Libraries
+#include <time.h>
 #include <math.h>
+#include <Preferences.h>
+#include <ArduinoJson.h>
+
+// 3. Display & Hardware Drivers
+#include <SPI.h>
+#include <TFT_eSPI.h>
+#include <XPT2046_Touchscreen.h>
 
 // =========================================================
 // WIFI
 // =========================================================
-const char* WIFI_SSID = "YOUR_WIFI_SSID";       // Replace with your WiFi network name
-const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";   // Replace with your WiFi password
+const char* WIFI_SSID = "YOUR_SSID";       // Replace with your WiFi network name
+const char* WIFI_PASS = "YOUR_PASSWORD";   // Replace with your WiFi password
 
 // =========================================================
 // DISPLAY / TOUCH
@@ -37,21 +36,21 @@ const bool INV = false;
 #define TOUCH_CS  33
 #define TOUCH_IRQ 36
 
-static const int T_SCK  = 25;
-static const int T_MISO = 39;
-static const int T_MOSI = 32;
+static const int T_SCK  = 14;
+static const int T_MISO = 12;
+static const int T_MOSI = 13;
 
 SPIClass touchSPI(VSPI);
 XPT2046_Touchscreen ts(TOUCH_CS);
 
-static const int TOUCH_X_MIN = 562;
-static const int TOUCH_X_MAX = 3604;
-static const int TOUCH_Y_MIN = 544;
-static const int TOUCH_Y_MAX = 3720;
+static const int TOUCH_X_MIN = 200;
+static const int TOUCH_X_MAX = 3800;
+static const int TOUCH_Y_MIN = 200;
+static const int TOUCH_Y_MAX = 3800;
 
 static const bool TOUCH_SWAP_XY = false;
 static const bool TOUCH_FLIP_X  = false;
-static const bool TOUCH_FLIP_Y  = false;
+static const bool TOUCH_FLIP_Y  = true;
 
 // =========================================================
 // WEB / STORAGE
@@ -68,9 +67,9 @@ TFT_eSprite sprSmall = TFT_eSprite(&tft);
 // =========================================================
 // LOCATION
 // =========================================================
-float LAT = 52.5200f;
-float LNG = 13.4050f;
-String locationName = "Berlin";
+float LAT = 37.0058f;
+float LNG = -121.5683f;
+String locationName = "Gilroy";
 
 // =========================================================
 // THEME
@@ -94,33 +93,35 @@ String regionFormatKey = "europe"; // europe = 24h + dd.mm.yyyy, us = 12h + mm/d
 String timezoneKey = "europe_central";
 
 // =========================================================
-// LAYOUT
+// LAYOUT CONSTANTS (RESCALED FOR 320x480)
 // =========================================================
-const int SCREEN_W = 240;
-const int SCREEN_H = 320;
-const int TOPBAR_H = 34;
-const int NAV_H    = 44;
+const int SCREEN_W = 320;
+const int SCREEN_H = 480;
+const int TOPBAR_H = 44;   // Tallored for 320 width text
+const int NAV_H    = 54;   // Larger touch targets on bottom navbar
 
-const int HOME_GRID_Y1 = 120;
-const int HOME_GRID_Y2 = 198;
-const int HOME_WIDGET_H = 70;
+// Grid Heights and Steps
+const int HOME_GRID_Y1 = 175;
+const int HOME_GRID_Y2 = 285;
+const int HOME_WIDGET_H = 95;
+const int HOME_WIDGET_W = 144;
 
-const int HOME_TIMER_X = 124;
-const int HOME_TIMER_Y = HOME_GRID_Y1;
-const int HOME_TIMER_W = 108;
-const int HOME_TIMER_H = HOME_WIDGET_H;
-const int TIMER_MENU_X = 20;
-const int TIMER_MENU_Y = 68;
-const int TIMER_MENU_W = 200;
-const int TIMER_MENU_H = 194;
-const int TIMER_DONE_X = 26;
-const int TIMER_DONE_Y = 92;
-const int TIMER_DONE_W = 188;
-const int TIMER_DONE_H = 108;
-const int PAGE_ROW1_Y = 42;
-const int PAGE_ROW2_Y = 120;
-const int PAGE_ROW3_Y = 198;
+const int PAGE_ROW1_Y = 54;
+const int PAGE_ROW2_Y = 164;
+const int PAGE_ROW3_Y = 274;
 const int PAGE_WIDGET_H = HOME_WIDGET_H;
+const int PAGE_WIDGET_W = HOME_WIDGET_W;
+
+// Popups and Overlays
+const int TIMER_MENU_X = 24;
+const int TIMER_MENU_Y = 90;
+const int TIMER_MENU_W = 272;
+const int TIMER_MENU_H = 270;
+
+const int TIMER_DONE_X = 32;
+const int TIMER_DONE_Y = 140;
+const int TIMER_DONE_W = 256;
+const int TIMER_DONE_H = 160;
 
 // =========================================================
 // NOTES
@@ -371,11 +372,11 @@ void appendTimezoneOptions(String& page, const String& selectedKey) {
 }
 
 void getHomeSlotRect(int slot, int& x, int& y, int& w, int& h) {
-  const int xs[HOME_SLOT_COUNT] = {8, 124, 8, 124};
+  const int xs[HOME_SLOT_COUNT] = {12, 164, 12, 164};
   const int ys[HOME_SLOT_COUNT] = {HOME_GRID_Y1, HOME_GRID_Y1, HOME_GRID_Y2, HOME_GRID_Y2};
   x = xs[slot];
   y = ys[slot];
-  w = 108;
+  w = HOME_WIDGET_W;
   h = HOME_WIDGET_H;
 }
 
@@ -469,7 +470,6 @@ const int FLASH_BL_LOW = 20;
 const int FLASH_BL_HIGH = 255;
 
 void wakeDisplay(bool clearManualMode = true);
-
 int sanitizeTimerMinutes(int value);
 
 // =========================================================
@@ -546,23 +546,19 @@ static String formatMinuteOfDay(int minOfDay) {
 
 static String tempText() {
   if (isnan(tempC)) return unitKey == "imperial" ? "--.-F" : "--.-C";
-
   if (unitKey == "imperial") {
     float f = tempC * 9.0f / 5.0f + 32.0f;
     return String(f, 1) + "F";
   }
-
   return String(tempC, 1) + "C";
 }
 
 static String formatDisplayTemp(float value) {
   if (isnan(value)) return "--";
-
   if (unitKey == "imperial") {
     float f = value * 9.0f / 5.0f + 32.0f;
     return String((int)roundf(f)) + "F";
   }
-
   return String((int)roundf(value)) + "C";
 }
 
@@ -572,29 +568,24 @@ static String tempRangeText() {
 
 static String rainText() {
   if (isnan(precipMm)) return unitKey == "imperial" ? "--.--in" : "--.-mm";
-
   if (unitKey == "imperial") {
     float inches = precipMm / 25.4f;
     return String(inches, 2) + "in";
   }
-
   return String(precipMm, 1) + "mm";
 }
 
 static String windText() {
   if (isnan(windSpeedMs)) return unitKey == "imperial" ? "--.-mph" : "--.-m/s";
-
   if (unitKey == "imperial") {
     float mph = windSpeedMs * 2.236936f;
     return String(mph, 1) + "mph";
   }
-
   return String(windSpeedMs, 1) + "m/s";
 }
 
 static String windDirectionText() {
   if (isnan(windDirectionDeg)) return "--";
-
   const char* dirs[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
   int idx = (int)roundf(windDirectionDeg / 45.0f) % 8;
   return String(dirs[idx]) + " " + String((int)roundf(windDirectionDeg)) + "deg";
@@ -716,7 +707,6 @@ static String themePreviewCss(const String& key) {
 static String formatTimerClock(unsigned long totalSec) {
   unsigned long minutes = totalSec / 60UL;
   unsigned long seconds = totalSec % 60UL;
-
   char buf[10];
   snprintf(buf, sizeof(buf), "%02lu:%02lu", minutes, seconds);
   return String(buf);
@@ -737,7 +727,6 @@ static String formatElapsedText(unsigned long totalSec) {
 
 static String lastSyncText() {
   if (lastSyncTime <= 0) return "Sync --:--";
-
   struct tm tmSync;
   localtime_r(&lastSyncTime, &tmSync);
   return "Sync " + formatClockParts(tmSync, false);
@@ -754,7 +743,6 @@ static String weekNumberText() {
 
 static String timerDoneCountdownText() {
   if (!timerDoneDialogOpen) return "";
-
   unsigned long elapsedMs = millis() - timerDoneDialogStartedMs;
   unsigned long remainingMs = (elapsedMs >= TIMER_DONE_DIALOG_MS) ? 0 : (TIMER_DONE_DIALOG_MS - elapsedMs);
   unsigned long remainingSec = (remainingMs + 999UL) / 1000UL;
@@ -885,7 +873,6 @@ void toggleSleepMode() {
     wakeDisplay();
     return;
   }
-
   manualDimMode = true;
   sleepDimmed = true;
   sleepOff = false;
@@ -904,7 +891,6 @@ void handleAutoSleep() {
   if (!sleepDimmed && !sleepOff && now - lastInteractionMs > dimAfterMs) {
     enterSleepDim();
   }
-
   if (sleepDimmed && !sleepOff && now - lastInteractionMs > offAfterMs) {
     enterSleepOff();
   }
@@ -955,7 +941,6 @@ void applyThemeByKey(const String& accentKey, const String& bgKey) {
 
 void applyTextColorByKey(const String& key) {
   textColorKey = key;
-
   if (key == "standard") {
     COL_TEXT = 0xEF7D; COL_DIM  = 0x94B2;
   } else if (key == "white") {
@@ -981,15 +966,12 @@ void applyTextColorByKey(const String& key) {
   } else if (key == "pink") {
     COL_TEXT = 0xF97F; COL_DIM = 0xC2F1;
   } else {
-    COL_TEXT = 0xEF7D;
-    COL_DIM  = 0x94B2;
-    textColorKey = "standard";
+    COL_TEXT = 0xEF7D; COL_DIM  = 0x94B2; textColorKey = "standard";
   }
 }
 
 void loadStoredSettings() {
   prefs.begin("deskbuddy", false);
-
   String accent = prefs.getString("accent", "cyan");
   String bg     = prefs.getString("bg", "slate");
   String txt    = prefs.getString("text", "standard");
@@ -1002,7 +984,7 @@ void loadStoredSettings() {
   sleepIntervalMin = prefs.getInt("sleepMin", 10);
   unitKey          = prefs.getString("units", "metric");
   regionFormatKey  = prefs.getString("region", "europe");
-  timezoneKey      = sanitizeTimezoneKey(prefs.getString("tz", "europe_central"));
+  timezoneKey      = sanitizeTimezoneKey(prefs.getString("tz", "us_pacific"));
   flashModeEnabled = prefs.getBool("flashMode", false);
   wifiEnabled      = prefs.getBool("wifiEnabled", true);
 
@@ -1010,7 +992,6 @@ void loadStoredSettings() {
     String key = String("homeSlot") + String(i);
     homeWidgetSlots[i] = homeWidgetFromKey(prefs.getString(key.c_str(), homeWidgetKey(homeWidgetSlots[i])));
   }
-
   for (int i = 0; i < 6; i++) {
     String key = String("timer") + String(i);
     timerPresetMin[i] = sanitizeTimerMinutes(prefs.getInt(key.c_str(), timerPresetMin[i]));
@@ -1025,18 +1006,10 @@ void loadStoredSettings() {
 }
 
 void resetDataCaches() {
-  tempC = NAN;
-  precipMm = NAN;
-  windSpeedMs = NAN;
-  windDirectionDeg = NAN;
-  kpIndex = NAN;
-  sunriseMin = -1;
-  sunsetMin = -1;
-  lastSunYmd = -1;
-  lastWeatherFetch = 0;
-  lastKpFetch = 0;
-  dataDirty = true;
-  pageDirty = true;
+  tempC = NAN; precipMm = NAN; windSpeedMs = NAN; windDirectionDeg = NAN; kpIndex = NAN;
+  sunriseMin = -1; sunsetMin = -1; lastSunYmd = -1;
+  lastWeatherFetch = 0; lastKpFetch = 0;
+  dataDirty = true; pageDirty = true;
 }
 
 // =========================================================
@@ -1044,7 +1017,6 @@ void resetDataCaches() {
 // =========================================================
 bool readTouchXY(int& sx, int& sy) {
   if (!ts.touched()) return false;
-
   TS_Point p = ts.getPoint();
   if (p.z < 80 || p.z > 4000) return false;
 
@@ -1058,30 +1030,24 @@ bool readTouchXY(int& sx, int& sy) {
   if (TOUCH_FLIP_X)  x = (SCREEN_W - 1) - x;
   if (TOUCH_FLIP_Y)  y = (SCREEN_H - 1) - y;
 
-  sx = x;
-  sy = y;
+  sx = x; sy = y;
   return true;
 }
 
 bool touchNewPress(int& tx, int& ty) {
   static bool wasDown = false;
   static unsigned long lastPressMs = 0;
-
   bool down = false;
   int x = 0, y = 0;
-
   if (readTouchXY(x, y)) down = true;
 
   bool fire = false;
   unsigned long now = millis();
-
   if (down && !wasDown && (now - lastPressMs > 220)) {
     fire = true;
     lastPressMs = now;
-    tx = x;
-    ty = y;
+    tx = x; ty = y;
   }
-
   wasDown = down;
   return fire;
 }
@@ -1091,26 +1057,19 @@ bool touchNewPress(int& tx, int& ty) {
 // =========================================================
 bool fetchSunriseSunset() {
   if (WiFi.status() != WL_CONNECTED) return false;
-
   WiFiClientSecure client;
   client.setInsecure();
-
   String url = String("https://api.sunrise-sunset.org/json?lat=") + String(LAT, 4) +
                "&lng=" + String(LNG, 4) + "&formatted=0";
 
   HTTPClient http;
   if (!http.begin(client, url)) return false;
-
   int code = http.GET();
-  if (code != 200) {
-    http.end();
-    return false;
-  }
-
+  if (code != 200) { http.end(); return false; }
   String body = http.getString();
   http.end();
 
-  StaticJsonDocument<1024> doc;
+  JsonDocument doc;
   if (deserializeJson(doc, body)) return false;
 
   const char* sunriseStr = doc["results"]["sunrise"];
@@ -1120,26 +1079,16 @@ bool fetchSunriseSunset() {
   auto parseIsoToEpochUTC = [](const char* iso) -> time_t {
     int Y, M, D, h, m, s;
     if (sscanf(iso, "%d-%d-%dT%d:%d:%d", &Y, &M, &D, &h, &m, &s) != 6) return (time_t)-1;
-
     struct tm t{};
-    t.tm_year = Y - 1900;
-    t.tm_mon  = M - 1;
-    t.tm_mday = D;
-    t.tm_hour = h;
-    t.tm_min  = m;
-    t.tm_sec  = s;
+    t.tm_year = Y - 1900; t.tm_mon  = M - 1; t.tm_mday = D;
+    t.tm_hour = h; t.tm_min  = m; t.tm_sec  = s;
 
     char* oldTz = getenv("TZ");
     String old = oldTz ? String(oldTz) : String("");
-
-    setenv("TZ", "UTC0", 1);
-    tzset();
+    setenv("TZ", "UTC0", 1); tzset();
     time_t epoch = mktime(&t);
-
-    if (old.length()) setenv("TZ", old.c_str(), 1);
-    else unsetenv("TZ");
+    if (old.length()) setenv("TZ", old.c_str(), 1); else unsetenv("TZ");
     tzset();
-
     return epoch;
   };
 
@@ -1157,47 +1106,37 @@ bool fetchSunriseSunset() {
 void ensureSunTimesForToday() {
   time_t nowT = time(nullptr);
   int ymd = ymdFromLocal(nowT);
-
-  if ((sunriseMin < 0 || sunsetMin < 0 || ymd != lastSunYmd) &&
-      WiFi.status() == WL_CONNECTED) {
+  if ((sunriseMin < 0 || sunsetMin < 0 || ymd != lastSunYmd) && WiFi.status() == WL_CONNECTED) {
     if (fetchSunriseSunset()) dataDirty = true;
   }
 }
 
 bool fetchWeather() {
   if (WiFi.status() != WL_CONNECTED) return false;
-
   WiFiClientSecure client;
   client.setInsecure();
-
   String url = String("https://api.open-meteo.com/v1/forecast?latitude=") + String(LAT, 4) +
-               "&longitude=" + String(LNG, 4) +
-               "&current=temperature_2m,wind_speed_10m,wind_direction_10m,uv_index" +
-               "&hourly=precipitation" +
-               "&daily=temperature_2m_max,temperature_2m_min" +
-               "&forecast_days=1&timezone=auto&wind_speed_unit=ms";
+             "&longitude=" + String(LNG, 4) +
+             "&current=temperature_2m,wind_speed_10m,wind_direction_10m,uv_index" +
+             "&hourly=precipitation" +
+             "&daily=temperature_2m_max,temperature_2m_min" +
+             "&forecast_days=1&timezone=UTC&wind_speed_unit=ms";
 
   HTTPClient http;
   if (!http.begin(client, url)) return false;
-
   int code = http.GET();
-  if (code != 200) {
-    http.end();
-    return false;
-  }
-
+  if (code != 200) { http.end(); return false; }
   String body = http.getString();
   http.end();
 
-  StaticJsonDocument<4096> doc;
+  JsonDocument doc;
   if (deserializeJson(doc, body)) return false;
 
   tempC = doc["current"]["temperature_2m"] | NAN;
   windSpeedMs = doc["current"]["wind_speed_10m"] | NAN;
   windDirectionDeg = doc["current"]["wind_direction_10m"] | NAN;
   uvIndex = doc["current"]["uv_index"] | NAN;
-  tempMaxC = NAN;
-  tempMinC = NAN;
+  tempMaxC = NAN; tempMinC = NAN;
 
   JsonArray maxTemps = doc["daily"]["temperature_2m_max"];
   JsonArray minTemps = doc["daily"]["temperature_2m_min"];
@@ -1211,17 +1150,12 @@ bool fetchWeather() {
     time_t nowT = time(nullptr);
     struct tm tmNow;
     localtime_r(&nowT, &tmNow);
-
     char key[20];
     strftime(key, sizeof(key), "%Y-%m-%dT%H:00", &tmNow);
-
     int idx = -1;
     for (int i = 0; i < (int)times.size(); i++) {
       const char* t = times[i];
-      if (t && String(t).startsWith(key)) {
-        idx = i;
-        break;
-      }
+      if (t && String(t).startsWith(key)) { idx = i; break; }
     }
     if (idx < 0) idx = 0;
     precipMm = precs[idx] | NAN;
@@ -1235,38 +1169,26 @@ bool fetchWeather() {
 void ensureWeather() {
   time_t nowT = time(nullptr);
   if ((isnan(tempC) || isnan(tempMinC) || isnan(tempMaxC) || isnan(precipMm) || isnan(windSpeedMs) || isnan(windDirectionDeg) || isnan(uvIndex) ||
-       (nowT - lastWeatherFetch) > WEATHER_INTERVAL_SEC) &&
-      WiFi.status() == WL_CONNECTED) {
+       (nowT - lastWeatherFetch) > WEATHER_INTERVAL_SEC) && WiFi.status() == WL_CONNECTED) {
     if (fetchWeather()) dataDirty = true;
   }
 }
 
 bool fetchKpIndex() {
   if (WiFi.status() != WL_CONNECTED) return false;
-
   WiFiClientSecure client;
   client.setInsecure();
-
   HTTPClient http;
-  if (!http.begin(client, "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json")) {
-    return false;
-  }
-
+  if (!http.begin(client, "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json")) return false;
   int code = http.GET();
-  if (code != 200) {
-    http.end();
-    return false;
-  }
-
+  if (code != 200) { http.end(); return false; }
   String body = http.getString();
   http.end();
 
   int lastRow = body.lastIndexOf('[');
   if (lastRow < 0) return false;
-
   int firstComma = body.indexOf(',', lastRow);
   if (firstComma < 0) return false;
-
   int q1 = body.indexOf('"', firstComma);
   if (q1 < 0) return false;
   int q2 = body.indexOf('"', q1 + 1);
@@ -1274,7 +1196,6 @@ bool fetchKpIndex() {
 
   String kpStrLocal = body.substring(q1 + 1, q2);
   kpIndex = kpStrLocal.toFloat();
-
   lastKpFetch = time(nullptr);
   lastSyncTime = lastKpFetch;
   return true;
@@ -1282,8 +1203,7 @@ bool fetchKpIndex() {
 
 void ensureKpIndex() {
   time_t nowT = time(nullptr);
-  if ((isnan(kpIndex) || (nowT - lastKpFetch) > KP_INTERVAL_SEC) &&
-      WiFi.status() == WL_CONNECTED) {
+  if ((isnan(kpIndex) || (nowT - lastKpFetch) > KP_INTERVAL_SEC) && WiFi.status() == WL_CONNECTED) {
     if (fetchKpIndex()) dataDirty = true;
   }
 }
@@ -1292,8 +1212,8 @@ void ensureKpIndex() {
 // DRAW HELPERS
 // =========================================================
 void drawCard(int x, int y, int w, int h, bool accent = false) {
-  tft.fillRoundRect(x, y, w, h, 10, COL_PANEL);
-  tft.drawRoundRect(x, y, w, h, 10, accent ? COL_ACCENT : COL_STROKE);
+  tft.fillRoundRect(x, y, w, h, 12, COL_PANEL);
+  tft.drawRoundRect(x, y, w, h, 12, accent ? COL_ACCENT : COL_STROKE);
 }
 
 void drawTopBar(const String& title) {
@@ -1302,24 +1222,24 @@ void drawTopBar(const String& title) {
 
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
-  tft.drawString(title, 10, 9, 2);
+  tft.drawString(title, 14, (TOPBAR_H / 2) - 8, 2);
 
-  const int bs = 25;
-  const int bx = SCREEN_W - bs - 6;
-  const int by = 4;
+  const int bs = 32; // Scaling touch icon bounds slightly larger for 480h
+  const int bx = SCREEN_W - bs - 10;
+  const int by = (TOPBAR_H - bs) / 2;
 
   uint16_t bg = (sleepDimmed || sleepOff) ? COL_ACCENT : COL_PANEL;
   uint16_t fg = (sleepDimmed || sleepOff) ? TFT_BLACK : COL_TEXT;
 
-  tft.fillRoundRect(bx, by, bs, bs, 7, bg);
-  tft.drawRoundRect(bx, by, bs, bs, 7, COL_ACCENT);
+  tft.fillRoundRect(bx, by, bs, bs, 8, bg);
+  tft.drawRoundRect(bx, by, bs, bs, 8, COL_ACCENT);
 
-  const int cx = bx + 12;
-  const int cy = by + 12;
+  const int cx = bx + (bs / 2);
+  const int cy = by + (bs / 2);
 
-  tft.drawCircle(cx, cy + 1, 6, fg);
-  tft.drawFastHLine(cx - 4, cy - 5, 9, bg);
-  tft.drawFastVLine(cx, cy - 7, 6, fg);
+  tft.drawCircle(cx, cy + 1, 7, fg);
+  tft.drawFastHLine(cx - 5, cy - 6, 11, bg);
+  tft.drawFastVLine(cx, cy - 8, 7, fg);
 }
 
 void drawNavBar() {
@@ -1344,7 +1264,6 @@ void drawNavBar() {
     tft.setTextColor(fg, bg);
     tft.drawString(names[i], bx + btnW / 2, y + NAV_H / 2, 1);
   }
-
   tft.setTextDatum(TL_DATUM);
 }
 
@@ -1352,8 +1271,8 @@ void makeSpriteCard(TFT_eSprite& spr, int w, int h, bool accent = false) {
   spr.setColorDepth(16);
   spr.createSprite(w, h);
   spr.fillSprite(COL_BG);
-  spr.fillRoundRect(0, 0, w, h, 10, COL_PANEL);
-  spr.drawRoundRect(0, 0, w, h, 10, accent ? COL_ACCENT : COL_STROKE);
+  spr.fillRoundRect(0, 0, w, h, 12, COL_PANEL);
+  spr.drawRoundRect(0, 0, w, h, 12, accent ? COL_ACCENT : COL_STROKE);
 }
 
 void pushSpriteAndDelete(TFT_eSprite& spr, int x, int y) {
@@ -1362,27 +1281,27 @@ void pushSpriteAndDelete(TFT_eSprite& spr, int x, int y) {
 }
 
 void drawCleanSunIcon(TFT_eSprite& spr, int cx, int cy, uint16_t c) {
-  spr.fillCircle(cx, cy, 4, c);
-  spr.drawLine(cx, cy - 9, cx, cy - 7, c);
-  spr.drawLine(cx, cy + 7, cx, cy + 9, c);
-  spr.drawLine(cx - 9, cy, cx - 7, cy, c);
-  spr.drawLine(cx + 7, cy, cx + 9, cy, c);
-  spr.drawLine(cx - 6, cy - 6, cx - 5, cy - 5, c);
-  spr.drawLine(cx + 5, cy - 5, cx + 6, cy - 6, c);
-  spr.drawLine(cx - 6, cy + 6, cx - 5, cy + 5, c);
-  spr.drawLine(cx + 5, cy + 5, cx + 6, cy + 6, c);
+  spr.fillCircle(cx, cy, 5, c);
+  spr.drawLine(cx, cy - 11, cx, cy - 8, c);
+  spr.drawLine(cx, cy + 8, cx, cy + 11, c);
+  spr.drawLine(cx - 11, cy, cx - 8, cy, c);
+  spr.drawLine(cx + 8, cy, cx + 11, cy, c);
+  spr.drawLine(cx - 7, cy - 7, cx - 6, cy - 6, c);
+  spr.drawLine(cx + 6, cy - 6, cx + 7, cy - 7, c);
+  spr.drawLine(cx - 7, cy + 7, cx - 6, cy + 6, c);
+  spr.drawLine(cx + 6, cy + 6, cx + 7, cy + 7, c);
 }
 
 void drawMoonIcon(TFT_eSprite& spr, int cx, int cy, uint16_t c) {
-  spr.fillCircle(cx, cy, 6, c);
-  spr.fillCircle(cx + 4, cy - 2, 6, COL_PANEL);
+  spr.fillCircle(cx, cy, 8, c);
+  spr.fillCircle(cx + 5, cy - 3, 8, COL_PANEL);
 }
 
 int drawWrappedTextLimited(int x, int y, int maxW, const String& text, int font, uint16_t fg, uint16_t bg, int maxLines) {
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(fg, bg);
 
-  const int lineH = tft.fontHeight(font) + 2;
+  const int lineH = tft.fontHeight(font) + 3;
   String line = "";
   String word = "";
   int linesDrawn = 0;
@@ -1390,64 +1309,35 @@ int drawWrappedTextLimited(int x, int y, int maxW, const String& text, int font,
   auto flushLine = [&]() {
     if (linesDrawn >= maxLines) return;
     if (line.length() > 0) tft.drawString(line, x, y, font);
-    y += lineH;
-    line = "";
-    linesDrawn++;
+    y += lineH; line = ""; linesDrawn++;
   };
 
   auto placeWordOnEmptyLine = [&]() {
     if (word.length() == 0 || linesDrawn >= maxLines) return;
-
     while (tft.textWidth(word, font) > maxW && word.length() > 1) {
       int cut = word.length();
       while (cut > 1 && tft.textWidth(word.substring(0, cut), font) > maxW) cut--;
       if (linesDrawn >= maxLines) return;
       tft.drawString(word.substring(0, cut), x, y, font);
-      y += lineH;
-      linesDrawn++;
+      y += lineH; linesDrawn++;
       word = word.substring(cut);
     }
-
-    if (linesDrawn < maxLines) {
-      line = word;
-      word = "";
-    }
+    if (linesDrawn < maxLines) { line = word; word = ""; }
   };
 
   auto flushWord = [&]() {
     if (word.length() == 0 || linesDrawn >= maxLines) return;
-
-    if (line.length() == 0) {
-      placeWordOnEmptyLine();
-      return;
-    }
-
+    if (line.length() == 0) { placeWordOnEmptyLine(); return; }
     String candidate = line + " " + word;
-    if (tft.textWidth(candidate, font) <= maxW) {
-      line = candidate;
-      word = "";
-      return;
-    }
-
-    flushLine();
-    placeWordOnEmptyLine();
+    if (tft.textWidth(candidate, font) <= maxW) { line = candidate; word = ""; return; }
+    flushLine(); placeWordOnEmptyLine();
   };
 
   for (int i = 0; i < (int)text.length(); i++) {
     if (linesDrawn >= maxLines) break;
     char c = text[i];
-
-    if (c == '\n') {
-      flushWord();
-      flushLine();
-      continue;
-    }
-
-    if (c == ' ') {
-      flushWord();
-      continue;
-    }
-
+    if (c == '\n') { flushWord(); flushLine(); continue; }
+    if (c == ' ') { flushWord(); continue; }
     word += c;
   }
 
@@ -1455,15 +1345,14 @@ int drawWrappedTextLimited(int x, int y, int maxW, const String& text, int font,
     flushWord();
     if (line.length() > 0) flushLine();
   }
-
   return y;
 }
 
 // =========================================================
-// HOME SPRITES
+// HOME SPRITES (SCALED UP FOR 320 WIDTH FOOTPRINT)
 // =========================================================
 void drawClockCardSprite(bool force = false) {
-  const int x = 8, y = PAGE_ROW1_Y, w = 224, h = HOME_WIDGET_H;
+  const int x = 12, y = PAGE_ROW1_Y, w = 296, h = 105; // Extended tracking size for 320w setup
 
   time_t now = time(nullptr);
   struct tm tmNow;
@@ -1482,32 +1371,34 @@ void drawClockCardSprite(bool force = false) {
   cacheClock = combined;
 
   makeSpriteCard(sprClock, w, h, true);
-
   sprClock.setTextDatum(TL_DATUM);
-
   sprClock.setTextColor(COL_TEXT, COL_PANEL);
+  
   if (useUsRegionFormat()) {
     int splitAt = timeBuf.lastIndexOf(' ');
     String clockMain = splitAt > 0 ? timeBuf.substring(0, splitAt) : timeBuf;
     String clockSuffix = splitAt > 0 ? timeBuf.substring(splitAt + 1) : "";
-    sprClock.drawString(clockMain, 10, 11, 4);
+    sprClock.drawString(clockMain, 14, 20, 4);
     if (clockSuffix.length() > 0) {
-      int suffixX = 10 + sprClock.textWidth(clockMain, 4) + 4;
-      sprClock.drawString(clockSuffix, suffixX, 18, 2);
+      int suffixX = 14 + sprClock.textWidth(clockMain, 4) + 6;
+      sprClock.drawString(clockSuffix, suffixX, 28, 2);
     }
   } else {
-    sprClock.drawString(timeBuf, 10, 11, 4);
+    sprClock.drawString(timeBuf, 14, 20, 4);
   }
 
   sprClock.setTextColor(COL_DIM, COL_PANEL);
-  sprClock.drawString(dateBuf, 10, 45, 2);
+  sprClock.drawString(dateBuf, 14, 62, 2);
 
-  drawCleanSunIcon(sprClock, 151, 22, COL_ACCENT);
-  drawMoonIcon(sprClock, 151, 50, COL_ACCENT);
-
+  // Scaled positioning on right side tracking block
+  int iconX = w - 95;
   sprClock.setTextColor(COL_ACCENT, COL_PANEL);
-  sprClock.drawString(sr, 165, 15, 2);
-  sprClock.drawString(ss, 165, 43, 2);
+  
+  drawCleanSunIcon(sprClock, iconX, 30, COL_ACCENT);
+  sprClock.drawString(sr, iconX + 18, 21, 2);
+  
+  drawMoonIcon(sprClock, iconX, 70, COL_ACCENT);
+  sprClock.drawString(ss, iconX + 18, 61, 2);
 
   pushSpriteAndDelete(sprClock, x, y);
 }
@@ -1520,19 +1411,17 @@ void drawMetricSprite(int x, int y, int w, int h, const char* label, const Strin
   cache = combined;
 
   makeSpriteCard(sprSmall, w, h, true);
-
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString(label, 10, 8, 2);
+  sprSmall.drawString(label, 14, 12, 2);
 
   sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-  sprSmall.drawString(value, 10, 31, 4);
+  sprSmall.drawString(value, 14, 40, 4);
 
   if (detail.length() > 0) {
     sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
-    sprSmall.drawString(detail, 10, 55, 1);
+    sprSmall.drawString(detail, 14, 70, 1);
   }
-
   pushSpriteAndDelete(sprSmall, x, y);
 }
 
@@ -1544,19 +1433,17 @@ void drawWeatherStyleMetricSprite(int x, int y, int w, int h, const char* label,
   cache = combined;
 
   makeSpriteCard(sprSmall, w, h, true);
-
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString(label, 10, 8, 2);
+  sprSmall.drawString(label, 14, 12, 2);
 
   sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-  sprSmall.drawString(value, 10, 28, 4);
+  sprSmall.drawString(value, 14, 38, 4);
 
   if (detail.length() > 0) {
     sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
-    sprSmall.drawString(detail, 10, 52, 1);
+    sprSmall.drawString(detail, 14, 68, 1);
   }
-
   pushSpriteAndDelete(sprSmall, x, y);
 }
 
@@ -1570,43 +1457,23 @@ void drawSunEventWidget(int x, int y, int w, int h, String& cache, bool force = 
   cache = combined;
 
   makeSpriteCard(sprSmall, w, h, true);
-
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString(label, 10, 8, 2);
+  sprSmall.drawString(label, 14, 12, 2);
 
   sprSmall.setTextColor(COL_TEXT, COL_PANEL);
   if (useUsRegionFormat()) {
     int splitAt = value.lastIndexOf(' ');
     String mainValue = splitAt > 0 ? value.substring(0, splitAt) : value;
     String suffix = splitAt > 0 ? value.substring(splitAt + 1) : "";
-    sprSmall.drawString(mainValue, 10, 30, 4);
+    sprSmall.drawString(mainValue, 14, 40, 4);
     if (suffix.length() > 0) {
-      int suffixX = 10 + sprSmall.textWidth(mainValue, 4) + 3;
-      sprSmall.drawString(suffix, suffixX, 35, 2);
+      int suffixX = 14 + sprSmall.textWidth(mainValue, 4) + 4;
+      sprSmall.drawString(suffix, suffixX, 46, 2);
     }
   } else {
-    sprSmall.drawString(value, 10, 30, 4);
+    sprSmall.drawString(value, 14, 40, 4);
   }
-
-  pushSpriteAndDelete(sprSmall, x, y);
-}
-
-void drawPlaceholderSprite(int x, int y, int w, int h, const char* label, String& cache, bool force = false) {
-  String combined = String(label) + "|" + String(COL_PANEL) + "|" + String(COL_STROKE) + "|" + String(COL_TEXT);
-
-  if (!force && combined == cache) return;
-  cache = combined;
-
-  makeSpriteCard(sprSmall, w, h, true);
-
-  sprSmall.setTextDatum(TL_DATUM);
-  sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString(label, 10, 8, 2);
-
-  sprSmall.setTextColor(COL_STROKE, COL_PANEL);
-  sprSmall.drawString("Empty", 10, 31, 2);
-
   pushSpriteAndDelete(sprSmall, x, y);
 }
 
@@ -1620,23 +1487,21 @@ void drawFocusTimerWidget(int x, int y, int w, int h, String& cache, bool force 
   cache = combined;
 
   makeSpriteCard(sprSmall, w, h, true);
-
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString("Timer", 10, 8, 2);
+  sprSmall.drawString("Timer", 14, 12, 2);
 
   if (focusMenuOpen) {
     sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-    sprSmall.drawString("Select", 10, 22, 4);
+    sprSmall.drawString("Select", 14, 32, 4);
     sprSmall.setTextColor(COL_DIM, COL_PANEL);
-    sprSmall.drawString("duration", 10, 44, 2);
+    sprSmall.drawString("duration", 14, 62, 2);
   } else {
     sprSmall.setTextColor(focusTimerFinished ? COL_GREEN : COL_TEXT, COL_PANEL);
-    sprSmall.drawString(value, 10, 24, 4);
+    sprSmall.drawString(value, 14, 34, 4);
     sprSmall.setTextColor(COL_DIM, COL_PANEL);
-    sprSmall.drawString(hint, 10, 49, 1);
+    sprSmall.drawString(hint, 14, 66, 1);
   }
-
   pushSpriteAndDelete(sprSmall, x, y);
 }
 
@@ -1646,29 +1511,21 @@ void drawHomeSlotWidget(int slot, bool force = false) {
 
   switch (homeWidgetSlots[slot]) {
     case HOME_WIDGET_WEEK:
-      drawMetricSprite(x, y, w, h, "Week", weekNumberText(), cacheHomeSlots[slot], force);
-      break;
+      drawMetricSprite(x, y, w, h, "Week", weekNumberText(), cacheHomeSlots[slot], force); break;
     case HOME_WIDGET_TIMER:
-      drawFocusTimerWidget(x, y, w, h, cacheHomeSlots[slot], force);
-      break;
+      drawFocusTimerWidget(x, y, w, h, cacheHomeSlots[slot], force); break;
     case HOME_WIDGET_RAIN:
-      drawWeatherStyleMetricSprite(x, y, w, h, "Rain", rainText(), cacheHomeSlots[slot], force);
-      break;
+      drawWeatherStyleMetricSprite(x, y, w, h, "Rain", rainText(), cacheHomeSlots[slot], force); break;
     case HOME_WIDGET_OUTDOOR:
-      drawWeatherStyleMetricSprite(x, y, w, h, "Outdoor", tempText(), cacheHomeSlots[slot], force, tempRangeText());
-      break;
+      drawWeatherStyleMetricSprite(x, y, w, h, "Outdoor", tempText(), cacheHomeSlots[slot], force, tempRangeText()); break;
     case HOME_WIDGET_KP:
-      drawWeatherStyleMetricSprite(x, y, w, h, "KP index", kpText(), cacheHomeSlots[slot], force, kpLevelText());
-      break;
+      drawWeatherStyleMetricSprite(x, y, w, h, "KP index", kpText(), cacheHomeSlots[slot], force, kpLevelText()); break;
     case HOME_WIDGET_UV:
-      drawWeatherStyleMetricSprite(x, y, w, h, "UV index", uvText(), cacheHomeSlots[slot], force, uvLevelText());
-      break;
+      drawWeatherStyleMetricSprite(x, y, w, h, "UV index", uvText(), cacheHomeSlots[slot], force, uvLevelText()); break;
     case HOME_WIDGET_WIND:
-      drawWeatherStyleMetricSprite(x, y, w, h, "Wind", windText(), cacheHomeSlots[slot], force, windDirectionText());
-      break;
+      drawWeatherStyleMetricSprite(x, y, w, h, "Wind", windText(), cacheHomeSlots[slot], force, windDirectionText()); break;
     case HOME_WIDGET_SUN:
-      drawSunEventWidget(x, y, w, h, cacheHomeSlots[slot], force);
-      break;
+      drawSunEventWidget(x, y, w, h, cacheHomeSlots[slot], force); break;
   }
 }
 
@@ -1683,17 +1540,18 @@ void drawFocusMenuOverlay(bool force = false) {
   tft.drawRoundRect(TIMER_MENU_X, TIMER_MENU_Y, TIMER_MENU_W, TIMER_MENU_H, 12, COL_ACCENT);
 
   tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
-  tft.drawString("Start timer", TIMER_MENU_X + 14, TIMER_MENU_Y + 12, 2);
+  tft.drawString("Start timer", TIMER_MENU_X + 16, TIMER_MENU_Y + 16, 2);
   tft.setTextColor(COL_DIM, COL_PANEL_ALT);
-  tft.drawString("Choose a session length", TIMER_MENU_X + 14, TIMER_MENU_Y + 34, 1);
+  tft.drawString("Choose a session length", TIMER_MENU_X + 16, TIMER_MENU_Y + 40, 1);
 
-  const int btnW = 74;
-  const int btnH = 28;
-  const int col1X = TIMER_MENU_X + 14;
-  const int col2X = TIMER_MENU_X + 112;
-  const int row1Y = TIMER_MENU_Y + 54;
-  const int row2Y = TIMER_MENU_Y + 88;
-  const int row3Y = TIMER_MENU_Y + 122;
+  // Scaled dimensions up inside menu popups
+  const int btnW = 105;
+  const int btnH = 36;
+  const int col1X = TIMER_MENU_X + 18;
+  const int col2X = TIMER_MENU_X + 148;
+  const int row1Y = TIMER_MENU_Y + 68;
+  const int row2Y = TIMER_MENU_Y + 114;
+  const int row3Y = TIMER_MENU_Y + 160;
 
   String labels[6];
   const int xs[] = {col1X, col2X, col1X, col2X, col1X, col2X};
@@ -1706,23 +1564,23 @@ void drawFocusMenuOverlay(bool force = false) {
     tft.fillRoundRect(xs[i], ys[i], btnW, btnH, 8, COL_PANEL);
     tft.drawRoundRect(xs[i], ys[i], btnW, btnH, 8, COL_STROKE);
     tft.setTextColor(COL_TEXT, COL_PANEL);
-    tft.drawCentreString(labels[i].c_str(), xs[i] + btnW / 2, ys[i] + 7, 2);
+    tft.drawCentreString(labels[i].c_str(), xs[i] + btnW / 2, ys[i] + 10, 2);
   }
 
-  const int actionY = TIMER_MENU_Y + 160;
-  const int actionW = 152;
-  const int actionX = TIMER_MENU_X + 24;
+  const int actionY = TIMER_MENU_Y + 215;
+  const int actionW = 210;
+  const int actionX = TIMER_MENU_X + (TIMER_MENU_W - actionW) / 2;
   const char* actionLabel = focusTimerRunning ? "Stop" : (focusTimerFinished ? "Reset" : nullptr);
   uint16_t actionColor = focusTimerRunning ? COL_RED : COL_ACCENT;
 
   if (actionLabel) {
-    tft.fillRoundRect(actionX, actionY - 4, actionW, 26, 8, COL_PANEL);
-    tft.drawRoundRect(actionX, actionY - 4, actionW, 26, 8, actionColor);
+    tft.fillRoundRect(actionX, actionY, actionW, 34, 8, COL_PANEL);
+    tft.drawRoundRect(actionX, actionY, actionW, 34, 8, actionColor);
     tft.setTextColor(actionColor, COL_PANEL);
-    tft.drawCentreString(actionLabel, actionX + actionW / 2, actionY + 4, 2);
+    tft.drawCentreString(actionLabel, actionX + actionW / 2, actionY + 8, 2);
   } else {
     tft.setTextColor(COL_DIM, COL_PANEL_ALT);
-    tft.drawCentreString("Tap outside to close", TIMER_MENU_X + TIMER_MENU_W / 2, TIMER_MENU_Y + TIMER_MENU_H - 13, 1);
+    tft.drawCentreString("Tap outside to close", TIMER_MENU_X + TIMER_MENU_W / 2, TIMER_MENU_Y + TIMER_MENU_H - 18, 1);
   }
 }
 
@@ -1733,8 +1591,10 @@ void drawTimerDoneOverlay(bool force = false) {
   String countdown = timerDoneCountdownText();
   bool flashOn = flashModeEnabled && ((millis() / 300UL) % 2UL == 0);
   setBacklight(flashModeEnabled ? (flashOn ? FLASH_BL_HIGH : FLASH_BL_LOW) : BL_FULL);
+  
   String combined = elapsed + "|" + String(COL_PANEL_ALT) + "|" + String(COL_ACCENT) + "|" + String(COL_TEXT);
   String flashKey = String(flashOn ? 1 : 0);
+  
   if (force || combined != cacheTimerDone || flashKey != cacheTimerDoneFlash) {
     cacheTimerDone = combined;
     cacheTimerDoneFlash = flashKey;
@@ -1742,23 +1602,24 @@ void drawTimerDoneOverlay(bool force = false) {
 
     uint16_t backdrop = flashOn ? COL_ACCENT : COL_BG;
     uint16_t panelBorder = flashOn ? TFT_WHITE : COL_ACCENT;
+    
     tft.fillRect(0, 0, SCREEN_W, SCREEN_H, backdrop);
     tft.fillRoundRect(TIMER_DONE_X, TIMER_DONE_Y, TIMER_DONE_W, TIMER_DONE_H, 12, COL_PANEL_ALT);
     tft.drawRoundRect(TIMER_DONE_X, TIMER_DONE_Y, TIMER_DONE_W, TIMER_DONE_H, 12, panelBorder);
 
     tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
-    tft.drawCentreString("Timer complete", TIMER_DONE_X + TIMER_DONE_W / 2, TIMER_DONE_Y + 14, 2);
+    tft.drawCentreString("Timer complete", TIMER_DONE_X + TIMER_DONE_W / 2, TIMER_DONE_Y + 20, 2);
     tft.setTextColor(COL_ACCENT, COL_PANEL_ALT);
-    tft.drawCentreString(elapsed, TIMER_DONE_X + TIMER_DONE_W / 2, TIMER_DONE_Y + 42, 2);
+    tft.drawCentreString(elapsed, TIMER_DONE_X + TIMER_DONE_W / 2, TIMER_DONE_Y + 54, 2);
     tft.setTextColor(COL_DIM, COL_PANEL_ALT);
-    tft.drawCentreString("Tap anywhere to acknowledge", TIMER_DONE_X + TIMER_DONE_W / 2, TIMER_DONE_Y + 68, 1);
+    tft.drawCentreString("Tap anywhere to acknowledge", TIMER_DONE_X + TIMER_DONE_W / 2, TIMER_DONE_Y + 92, 1);
   }
 
   if (force || countdown != cacheTimerDoneCountdown) {
     cacheTimerDoneCountdown = countdown;
-    tft.fillRect(TIMER_DONE_X + 28, TIMER_DONE_Y + 82, TIMER_DONE_W - 56, 12, COL_PANEL_ALT);
+    tft.fillRect(TIMER_DONE_X + 20, TIMER_DONE_Y + 116, TIMER_DONE_W - 40, 16, COL_PANEL_ALT);
     tft.setTextColor(COL_DIM, COL_PANEL_ALT);
-    tft.drawCentreString(countdown.c_str(), TIMER_DONE_X + TIMER_DONE_W / 2, TIMER_DONE_Y + 82, 1);
+    tft.drawCentreString(countdown.c_str(), TIMER_DONE_X + TIMER_DONE_W / 2, TIMER_DONE_Y + 116, 1);
   }
 }
 
@@ -1770,13 +1631,8 @@ void drawHomePageFull() {
   drawTopBar(homeTitleText());
   drawNavBar();
 
-  cacheClock = "";
-  cacheHomeEmpty1 = "";
-  cacheHomeEmpty2 = "";
-  cacheFocusTimer = "";
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    cacheHomeSlots[i] = "";
-  }
+  cacheClock = ""; cacheHomeEmpty1 = ""; cacheHomeEmpty2 = ""; cacheFocusTimer = "";
+  for (int i = 0; i < HOME_SLOT_COUNT; i++) cacheHomeSlots[i] = "";
 
   pageDirty = false;
   lastDrawnPage = PAGE_HOME;
@@ -1790,16 +1646,8 @@ void drawHomePageFull() {
 }
 
 void updateHomeDynamic() {
-  if (timerDoneDialogOpen) {
-    drawTimerDoneOverlay(false);
-    return;
-  }
-
-  if (focusMenuOpen) {
-    drawFocusMenuOverlay(false);
-    return;
-  }
-
+  if (timerDoneDialogOpen) { drawTimerDoneOverlay(false); return; }
+  if (focusMenuOpen) { drawFocusMenuOverlay(false); return; }
   drawClockCardSprite(false);
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     drawHomeSlotWidget(i, false);
@@ -1811,26 +1659,20 @@ void drawWeatherPageFull() {
   drawTopBar("Weather");
   drawNavBar();
 
-  drawCard(8, PAGE_ROW1_Y, 108, PAGE_WIDGET_H, true);
-  drawCard(124, PAGE_ROW1_Y, 108, PAGE_WIDGET_H, true);
-  drawCard(8, PAGE_ROW2_Y, 108, PAGE_WIDGET_H, true);
-  drawCard(124, PAGE_ROW2_Y, 108, PAGE_WIDGET_H, true);
-  drawCard(8, PAGE_ROW3_Y, 108, PAGE_WIDGET_H, true);
-  drawCard(124, PAGE_ROW3_Y, 108, PAGE_WIDGET_H, true);
+  // Draw 6 grid cells properly configured for 320x480 allocation footprints
+  drawCard(12, PAGE_ROW1_Y, PAGE_WIDGET_W, PAGE_WIDGET_H, true);
+  drawCard(164, PAGE_ROW1_Y, PAGE_WIDGET_W, PAGE_WIDGET_H, true);
+  drawCard(12, PAGE_ROW2_Y, PAGE_WIDGET_W, PAGE_WIDGET_H, true);
+  drawCard(164, PAGE_ROW2_Y, PAGE_WIDGET_W, PAGE_WIDGET_H, true);
+  drawCard(12, PAGE_ROW3_Y, PAGE_WIDGET_W, PAGE_WIDGET_H, true);
+  drawCard(164, PAGE_ROW3_Y, PAGE_WIDGET_W, PAGE_WIDGET_H, true);
 
   pageDirty = false;
   lastDrawnPage = PAGE_WEATHER;
 
-  lastTempText = "";
-  lastRainText = "";
-  lastUvText = "";
-  lastUvLevelText = "";
-  lastKpText = "";
-  lastKpLevelText = "";
-  lastWindText = "";
-  lastWindDirText = "";
-  lastNextSunLabel = "";
-  lastNextSunTime = "";
+  lastTempText = ""; lastRainText = ""; lastUvText = ""; lastUvLevelText = "";
+  lastKpText = ""; lastKpLevelText = ""; lastWindText = ""; lastWindDirText = "";
+  lastNextSunLabel = ""; lastNextSunTime = "";
 }
 
 void updateWeatherDynamic() {
@@ -1838,89 +1680,85 @@ void updateWeatherDynamic() {
   String tr = tempRangeText();
   String tempCombined = t + "|" + tr;
   if (tempCombined != lastTempText) {
-    tft.fillRect(18, PAGE_ROW1_Y + 30, 88, 30, COL_PANEL);
+    tft.fillRect(24, PAGE_ROW1_Y + 38, 120, 42, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("Outdoor", 18, PAGE_ROW1_Y + 8, 2);
+    tft.drawString("Outdoor", 24, PAGE_ROW1_Y + 12, 2);
     tft.setTextColor(COL_TEXT, COL_PANEL);
-    tft.drawString(t, 18, PAGE_ROW1_Y + 30, 4);
+    tft.drawString(t, 24, PAGE_ROW1_Y + 36, 4);
     tft.setTextColor(COL_ACCENT, COL_PANEL);
-    tft.drawString(tr, 18, PAGE_ROW1_Y + 54, 1);
+    tft.drawString(tr, 24, PAGE_ROW1_Y + 68, 1);
     lastTempText = tempCombined;
   }
 
   String r = rainText();
   if (r != lastRainText) {
-    tft.fillRect(134, PAGE_ROW1_Y + 30, 88, 24, COL_PANEL);
+    tft.fillRect(176, PAGE_ROW1_Y + 38, 120, 36, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("Rain", 134, PAGE_ROW1_Y + 8, 2);
+    tft.drawString("Rain", 176, PAGE_ROW1_Y + 12, 2);
     tft.setTextColor(COL_TEXT, COL_PANEL);
-    tft.drawString(r, 134, PAGE_ROW1_Y + 30, 4);
+    tft.drawString(r, 176, PAGE_ROW1_Y + 36, 4);
     lastRainText = r;
   }
 
   String u = uvText();
   String ul = uvLevelText();
   if (u != lastUvText || ul != lastUvLevelText || dataDirty) {
-    tft.fillRect(18, PAGE_ROW2_Y + 30, 88, 30, COL_PANEL);
+    tft.fillRect(24, PAGE_ROW2_Y + 38, 120, 42, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("UV index", 18, PAGE_ROW2_Y + 8, 2);
+    tft.drawString("UV index", 24, PAGE_ROW2_Y + 12, 2);
     tft.setTextColor(COL_TEXT, COL_PANEL);
-    tft.drawString(u, 18, PAGE_ROW2_Y + 28, 4);
+    tft.drawString(u, 24, PAGE_ROW2_Y + 34, 4);
     tft.setTextColor(COL_ACCENT, COL_PANEL);
-    tft.drawString(ul, 18, PAGE_ROW2_Y + 52, 1);
-    lastUvText = u;
-    lastUvLevelText = ul;
+    tft.drawString(ul, 24, PAGE_ROW2_Y + 66, 1);
+    lastUvText = u; lastUvLevelText = ul;
   }
 
   String w = windText();
   String wd = windDirectionText();
   if (w != lastWindText || wd != lastWindDirText) {
-    tft.fillRect(134, PAGE_ROW2_Y + 30, 88, 30, COL_PANEL);
+    tft.fillRect(176, PAGE_ROW2_Y + 38, 120, 42, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("Wind", 134, PAGE_ROW2_Y + 8, 2);
+    tft.drawString("Wind", 176, PAGE_ROW2_Y + 12, 2);
     tft.setTextColor(COL_TEXT, COL_PANEL);
-    tft.drawString(w, 134, PAGE_ROW2_Y + 28, 4);
+    tft.drawString(w, 176, PAGE_ROW2_Y + 34, 4);
     tft.setTextColor(COL_ACCENT, COL_PANEL);
-    tft.drawString(wd, 134, PAGE_ROW2_Y + 52, 1);
-    lastWindText = w;
-    lastWindDirText = wd;
+    tft.drawString(wd, 176, PAGE_ROW2_Y + 66, 1);
+    lastWindText = w; lastWindDirText = wd;
   }
 
   String nl = nextSunLabel();
   String nt = nextSunTimeText();
   if (nl != lastNextSunLabel || nt != lastNextSunTime) {
-    tft.fillRect(18, PAGE_ROW3_Y + 24, 88, 30, COL_PANEL);
+    tft.fillRect(24, PAGE_ROW3_Y + 32, 120, 42, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString(nl, 18, PAGE_ROW3_Y + 8, 2);
+    tft.drawString(nl, 24, PAGE_ROW3_Y + 12, 2);
     tft.setTextColor(COL_TEXT, COL_PANEL);
     if (useUsRegionFormat()) {
       int splitAt = nt.lastIndexOf(' ');
       String sunMain = splitAt > 0 ? nt.substring(0, splitAt) : nt;
       String sunSuffix = splitAt > 0 ? nt.substring(splitAt + 1) : "";
-      tft.drawString(sunMain, 18, PAGE_ROW3_Y + 26, 4);
+      tft.drawString(sunMain, 24, PAGE_ROW3_Y + 34, 4);
       if (sunSuffix.length() > 0) {
-        int suffixX = 18 + tft.textWidth(sunMain, 4) + 3;
-        tft.drawString(sunSuffix, suffixX, PAGE_ROW3_Y + 31, 2);
+        int suffixX = 24 + tft.textWidth(sunMain, 4) + 4;
+        tft.drawString(sunSuffix, suffixX, PAGE_ROW3_Y + 40, 2);
       }
     } else {
-      tft.drawString(nt, 18, PAGE_ROW3_Y + 26, 4);
+      tft.drawString(nt, 24, PAGE_ROW3_Y + 34, 4);
     }
-    lastNextSunLabel = nl;
-    lastNextSunTime = nt;
+    lastNextSunLabel = nl; lastNextSunTime = nt;
   }
 
   String k = kpText();
   String kl = kpLevelText();
   if (k != lastKpText || kl != lastKpLevelText || dataDirty) {
-    tft.fillRect(134, PAGE_ROW3_Y + 30, 88, 30, COL_PANEL);
+    tft.fillRect(176, PAGE_ROW3_Y + 38, 120, 42, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("KP index", 134, PAGE_ROW3_Y + 8, 2);
+    tft.drawString("KP index", 176, PAGE_ROW3_Y + 12, 2);
     tft.setTextColor(COL_TEXT, COL_PANEL);
-    tft.drawString(k, 134, PAGE_ROW3_Y + 28, 4);
+    tft.drawString(k, 176, PAGE_ROW3_Y + 34, 4);
     tft.setTextColor(COL_ACCENT, COL_PANEL);
-    tft.drawString(kl, 134, PAGE_ROW3_Y + 52, 1);
-    lastKpText = k;
-    lastKpLevelText = kl;
+    tft.drawString(kl, 176, PAGE_ROW3_Y + 66, 1);
+    lastKpText = k; lastKpLevelText = kl;
   }
 }
 
@@ -1929,7 +1767,8 @@ void drawNotesPageFull() {
   drawTopBar("Notes");
   drawNavBar();
 
-  drawCard(8, 42, 224, 226, true);
+  // Centered notes card layout boundary logic scale to match target width bounds
+  drawCard(12, 54, 296, 350, true);
 
   pageDirty = false;
   lastDrawnPage = PAGE_NOTES;
@@ -1938,8 +1777,8 @@ void drawNotesPageFull() {
 
 void updateNotesDynamic() {
   if (notesText != lastNotesText || notesDirty) {
-    tft.fillRect(18, 54, 204, 196, COL_PANEL);
-    drawWrappedTextLimited(18, 54, 198, notesText, 2, COL_TEXT, COL_PANEL, 12);
+    tft.fillRect(24, 68, 272, 320, COL_PANEL);
+    drawWrappedTextLimited(24, 68, 264, notesText, 2, COL_TEXT, COL_PANEL, 16);
     lastNotesText = notesText;
     notesDirty = false;
   }
@@ -1950,63 +1789,60 @@ void drawStatusPageFull() {
   drawTopBar("Status");
   drawNavBar();
 
-  drawCard(8, PAGE_ROW1_Y, 108, PAGE_WIDGET_H, true);
-  drawCard(124, PAGE_ROW1_Y, 108, PAGE_WIDGET_H, true);
-  drawCard(8, PAGE_ROW2_Y, 224, PAGE_WIDGET_H, true);
-  drawCard(8, PAGE_ROW3_Y, 108, PAGE_WIDGET_H, true);
-  drawCard(124, PAGE_ROW3_Y, 108, PAGE_WIDGET_H, true);
+  drawCard(12, PAGE_ROW1_Y, PAGE_WIDGET_W, PAGE_WIDGET_H, true);
+  drawCard(164, PAGE_ROW1_Y, PAGE_WIDGET_W, PAGE_WIDGET_H, true);
+  drawCard(12, PAGE_ROW2_Y, 296, PAGE_WIDGET_H, true);
+  drawCard(12, PAGE_ROW3_Y, PAGE_WIDGET_W, PAGE_WIDGET_H, true);
+  drawCard(164, PAGE_ROW3_Y, PAGE_WIDGET_W, PAGE_WIDGET_H, true);
 
   pageDirty = false;
   lastDrawnPage = PAGE_STATUS;
 
-  lastWifiText = "";
-  lastSignalText = "";
-  lastIpText = "";
-  lastUptimeText = "";
-  lastNetworkToggleText = "";
+  lastWifiText = ""; lastSignalText = ""; lastIpText = "";
+  lastUptimeText = ""; lastNetworkToggleText = "";
 }
 
 void updateStatusDynamic() {
   String w = wifiStatusText();
   if (w != lastWifiText) {
-    tft.fillRect(18, PAGE_ROW1_Y + 24, 88, 30, COL_PANEL);
+    tft.fillRect(24, PAGE_ROW1_Y + 32, 120, 36, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("WiFi", 18, PAGE_ROW1_Y + 8, 2);
+    tft.drawString("WiFi", 24, PAGE_ROW1_Y + 12, 2);
     tft.setTextColor(statusColor(), COL_PANEL);
-    tft.drawString(w, 18, PAGE_ROW1_Y + 32, 2);
+    tft.drawString(w, 24, PAGE_ROW1_Y + 38, 2);
     lastWifiText = w;
   }
 
   String s = signalText();
   if (s != lastSignalText) {
-    tft.fillRect(134, PAGE_ROW1_Y + 30, 88, 24, COL_PANEL);
+    tft.fillRect(176, PAGE_ROW1_Y + 38, 120, 34, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("Signal", 134, PAGE_ROW1_Y + 8, 2);
+    tft.drawString("Signal", 176, PAGE_ROW1_Y + 12, 2);
     tft.setTextColor(COL_TEXT, COL_PANEL);
-    tft.drawString(s, 134, PAGE_ROW1_Y + 30, 4);
+    tft.drawString(s, 176, PAGE_ROW1_Y + 38, 4);
     lastSignalText = s;
   }
 
   String ip = ipText();
   if (ip != lastIpText) {
-    tft.fillRect(18, PAGE_ROW2_Y + 30, 200, 18, COL_PANEL);
+    tft.fillRect(24, PAGE_ROW2_Y + 38, 272, 24, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("IP address", 18, PAGE_ROW2_Y + 8, 2);
+    tft.drawString("IP address", 24, PAGE_ROW2_Y + 12, 2);
     tft.setTextColor(COL_TEXT, COL_PANEL);
-    tft.drawString(ip, 18, PAGE_ROW2_Y + 30, 2);
+    tft.drawString(ip, 24, PAGE_ROW2_Y + 38, 2);
     lastIpText = ip;
   }
 
   String up = uptimeText();
   String upCombined = up + "|" + lastSyncText();
   if (upCombined != lastUptimeText) {
-    tft.fillRect(18, PAGE_ROW3_Y + 26, 88, 26, COL_PANEL);
+    tft.fillRect(24, PAGE_ROW3_Y + 32, 120, 42, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("Uptime", 18, PAGE_ROW3_Y + 10, 2);
+    tft.drawString("Uptime", 24, PAGE_ROW3_Y + 12, 2);
     tft.setTextColor(COL_TEXT, COL_PANEL);
-    tft.drawString(up, 18, PAGE_ROW3_Y + 26, 2);
+    tft.drawString(up, 24, PAGE_ROW3_Y + 34, 2);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString(lastSyncText(), 18, PAGE_ROW3_Y + 42, 1);
+    tft.drawString(lastSyncText(), 24, PAGE_ROW3_Y + 56, 1);
     lastUptimeText = upCombined;
   }
 
@@ -2016,13 +1852,13 @@ void updateStatusDynamic() {
     uint16_t btnFg = wifiEnabled ? TFT_BLACK : COL_TEXT;
     uint16_t btnStroke = wifiEnabled ? COL_ACCENT : COL_STROKE;
 
-    tft.fillRect(132, PAGE_ROW3_Y + 8, 92, 42, COL_PANEL);
+    tft.fillRect(174, PAGE_ROW3_Y + 12, 124, 54, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("Network", 134, PAGE_ROW3_Y + 10, 2);
-    tft.fillRoundRect(134, PAGE_ROW3_Y + 30, 88, 22, 8, btnBg);
-    tft.drawRoundRect(134, PAGE_ROW3_Y + 30, 88, 22, 8, btnStroke);
+    tft.drawString("Network", 176, PAGE_ROW3_Y + 12, 2);
+    tft.fillRoundRect(176, PAGE_ROW3_Y + 38, 120, 32, 8, btnBg);
+    tft.drawRoundRect(176, PAGE_ROW3_Y + 38, 120, 32, 8, btnStroke);
     tft.setTextColor(btnFg, btnBg);
-    tft.drawCentreString(networkLabel.c_str(), 178, PAGE_ROW3_Y + 32, 2);
+    tft.drawCentreString(networkLabel.c_str(), 236, PAGE_ROW3_Y + 44, 2);
     lastNetworkToggleText = networkLabel;
   }
 }
@@ -2034,21 +1870,13 @@ void drawCurrentPageFull() {
     case PAGE_NOTES:   drawNotesPageFull(); break;
     case PAGE_STATUS:  drawStatusPageFull(); break;
   }
-
   if (focusMenuOpen && currentPage == PAGE_HOME) drawFocusMenuOverlay(true);
   if (timerDoneDialogOpen) drawTimerDoneOverlay(true);
 }
 
 void updateCurrentPageDynamic() {
-  if (timerDoneDialogOpen) {
-    drawTimerDoneOverlay(false);
-    return;
-  }
-
-  if (focusMenuOpen && currentPage == PAGE_HOME) {
-    drawFocusMenuOverlay(false);
-    return;
-  }
+  if (timerDoneDialogOpen) { drawTimerDoneOverlay(false); return; }
+  if (focusMenuOpen && currentPage == PAGE_HOME) { drawFocusMenuOverlay(false); return; }
 
   switch (currentPage) {
     case PAGE_HOME:    updateHomeDynamic(); break;
@@ -2062,54 +1890,37 @@ bool handleFocusMenuTouch(int x, int y) {
   if (!focusMenuOpen) return false;
 
   if (x < TIMER_MENU_X || x >= TIMER_MENU_X + TIMER_MENU_W || y < TIMER_MENU_Y || y >= TIMER_MENU_Y + TIMER_MENU_H) {
-    focusMenuOpen = false;
-    cacheTimerMenu = "";
-    pageDirty = true;
-    return true;
+    focusMenuOpen = false; cacheTimerMenu = ""; pageDirty = true; return true;
   }
 
-  struct ButtonHit {
-    int x;
-    int y;
-    int w;
-    int h;
-    int minutes;
-  };
+  struct ButtonHit { int x; int y; int w; int h; int minutes; };
 
+  // Recalibrated touch interaction boxes inside dynamic scaling arrays
   const ButtonHit buttons[] = {
-    {34, 124, 74, 28, timerPresetMin[0]},
-    {132, 124, 74, 28, timerPresetMin[1]},
-    {34, 158, 74, 28, timerPresetMin[2]},
-    {132, 158, 74, 28, timerPresetMin[3]},
-    {34, 192, 74, 28, timerPresetMin[4]},
-    {132, 192, 74, 28, timerPresetMin[5]}
+    {TIMER_MENU_X + 18, TIMER_MENU_Y + 68, 105, 36, timerPresetMin[0]},
+    {TIMER_MENU_X + 148, TIMER_MENU_Y + 68, 105, 36, timerPresetMin[1]},
+    {TIMER_MENU_X + 18, TIMER_MENU_Y + 114, 105, 36, timerPresetMin[2]},
+    {TIMER_MENU_X + 148, TIMER_MENU_Y + 114, 105, 36, timerPresetMin[3]},
+    {TIMER_MENU_X + 18, TIMER_MENU_Y + 160, 105, 36, timerPresetMin[4]},
+    {TIMER_MENU_X + 148, TIMER_MENU_Y + 160, 105, 36, timerPresetMin[5]}
   };
 
   for (const ButtonHit& btn : buttons) {
     if (x >= btn.x && x < btn.x + btn.w && y >= btn.y && y < btn.y + btn.h) {
-      startFocusTimer(btn.minutes);
-      pageDirty = true;
-      return true;
+      startFocusTimer(btn.minutes); pageDirty = true; return true;
     }
   }
 
-  if ((focusTimerRunning || focusTimerFinished) && x >= 44 && x < 196 && y >= 224 && y < 250) {
-    if (focusTimerRunning || focusTimerFinished) {
-      resetFocusTimer();
-    } else {
-      focusMenuOpen = false;
-      cacheTimerMenu = "";
-    }
-    pageDirty = true;
-    return true;
+  // Action button hit target check scale
+  const int actionY = TIMER_MENU_Y + 215;
+  if ((focusTimerRunning || focusTimerFinished) && x >= (TIMER_MENU_X + 30) && x < (TIMER_MENU_X + TIMER_MENU_W - 30) && y >= actionY && y < actionY + 36) {
+    resetFocusTimer(); pageDirty = true; return true;
   }
-
   return true;
 }
 
 bool handleHomeTouch(int x, int y) {
   if (currentPage != PAGE_HOME) return false;
-
   if (focusMenuOpen) return handleFocusMenuTouch(x, y);
 
   for (int slot = 0; slot < HOME_SLOT_COUNT; slot++) {
@@ -2122,22 +1933,16 @@ bool handleHomeTouch(int x, int y) {
       if (focusTimerFinished) {
         resetFocusTimer();
       } else {
-        focusMenuOpen = true;
-        cacheFocusTimer = "";
-        clearHomeSlotCaches();
-        cacheTimerMenu = "";
+        focusMenuOpen = true; cacheFocusTimer = ""; clearHomeSlotCaches(); cacheTimerMenu = "";
       }
-      pageDirty = true;
-      return true;
+      pageDirty = true; return true;
     }
   }
-
   return false;
 }
 
 bool handleTimerDoneDialogTouch(int x, int y) {
-  (void)x;
-  (void)y;
+  (void)x; (void)y;
   if (!timerDoneDialogOpen) return false;
   dismissTimerDoneDialog();
   return true;
@@ -2145,34 +1950,30 @@ bool handleTimerDoneDialogTouch(int x, int y) {
 
 bool handleStatusTouch(int x, int y) {
   if (currentPage != PAGE_STATUS) return false;
-
-  if (x >= 124 && x < 232 && y >= 198 && y < 268) {
-    setWifiEnabled(!wifiEnabled);
-    return true;
+  // Network button bounds scaling matching new 480 location
+  if (x >= 164 && x < 296 && y >= PAGE_ROW3_Y && y < PAGE_ROW3_Y + HOME_WIDGET_H) {
+    setWifiEnabled(!wifiEnabled); return true;
   }
-
   return false;
 }
 
 // =========================================================
-// NAVIGATION
+// NAVIGATION (SCALED FOR 320 WIDTH NAV FOOTPRINT)
 // =========================================================
 void handleNavTouch(int x, int y) {
   if (y < SCREEN_H - NAV_H) return;
-
   int btnW = SCREEN_W / 4;
   int idx = x / btnW;
   if (idx < 0 || idx > 3) return;
 
   Page newPage = (Page)idx;
   if (newPage != currentPage) {
-    currentPage = newPage;
-    pageDirty = true;
+    currentPage = newPage; pageDirty = true;
   }
 }
 
 // =========================================================
-// WEB SERVER
+// WEB SERVER (Unchanged Settings/Interface Structures)
 // =========================================================
 void handleRoot() {
   String accent = prefs.getString("accent", "cyan");
@@ -2180,7 +1981,7 @@ void handleRoot() {
   String txt    = prefs.getString("text", "standard");
   String units  = prefs.getString("units", "metric");
   String region = prefs.getString("region", "europe");
-  String tz     = sanitizeTimezoneKey(prefs.getString("tz", "europe_central"));
+  String tz     = sanitizeTimezoneKey(prefs.getString("tz", "us_pacific"));
   String nickname = prefs.getString("nickname", "");
   bool flashMode = prefs.getBool("flashMode", false);
   String homeSlotKeys[HOME_SLOT_COUNT];
@@ -2188,93 +1989,13 @@ void handleRoot() {
     homeSlotKeys[i] = prefs.getString((String("homeSlot") + String(i)).c_str(), homeWidgetKey(homeWidgetSlots[i]));
   }
 
-  String page;
-  page.reserve(21000);
-
-  page += "<!doctype html><html><head>";
-  page += "<meta charset='utf-8'>";
-  page += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
-  page += "<title>Deskbuddy</title>";
-  page += "<style>";
-  page += ":root{color-scheme:dark;}";
-  page += "body{margin:0;background:linear-gradient(180deg,#0b1018 0%,#111827 100%);color:#edf2f7;font-family:system-ui,sans-serif;}";
-  page += ".wrap{max-width:980px;margin:0 auto;padding:28px 16px 36px;}";
-  page += ".hero{margin-bottom:18px;padding:18px 20px;border:1px solid #243244;border-radius:20px;background:linear-gradient(135deg,#111927 0%,#172235 100%);box-shadow:0 10px 30px rgba(0,0,0,.22);}";
-  page += ".hero h1{font-size:30px;margin:0 0 8px 0;}";
-  page += ".hero p{margin:0;color:#a9b7c9;font-size:14px;}";
-  page += ".ip{display:inline-block;margin-top:14px;padding:8px 12px;border-radius:999px;background:#0b1220;border:1px solid #334155;color:#dbe7f5;font-size:13px;}";
-  page += ".layout{display:grid;grid-template-columns:1.15fr .85fr;gap:16px;align-items:start;}";
-  page += ".stack{display:grid;gap:16px;}";
-  page += ".panel{background:#171b22;border:1px solid #2d3748;border-radius:18px;padding:18px;margin:0;}";
-  page += ".panel-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;background:none;border:none;color:#edf2f7;padding:0;margin:0;cursor:pointer;text-align:left;}";
-  page += ".panel-toggle:hover{color:#ffffff;}";
-  page += ".panel-toggle h2{flex:1;}";
-  page += ".panel-chevron{font-size:18px;color:#8ea3ba;transition:transform .18s ease;}";
-  page += ".panel.collapsed .panel-chevron{transform:rotate(-90deg);}";
-  page += ".panel-body{margin-top:12px;}";
-  page += ".panel.collapsed .panel-body{display:none;}";
-  page += ".panel h2{margin:0 0 6px 0;font-size:18px;}";
-  page += ".panel p{margin:0 0 14px 0;color:#94a3b8;font-size:13px;line-height:1.45;}";
-  page += ".grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}";
-  page += ".grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}";
-  page += ".label{display:block;font-size:13px;margin:0 0 8px 0;color:#a0aec0;font-weight:600;}";
-  page += "textarea,input,select{width:100%;border-radius:12px;border:1px solid #334155;background:#0b1220;color:#edf2f7;padding:12px;box-sizing:border-box;font:inherit;}";
-  page += "textarea{min-height:170px;resize:vertical;}";
-  page += "button{margin-top:18px;background:#38bdf8;border:none;color:#001018;padding:13px 18px;border-radius:12px;font-weight:800;cursor:pointer;font:inherit;}";
-  page += ".muted{font-size:13px;color:#94a3b8;line-height:1.45;}";
-  page += ".footer-note{margin-top:10px;font-size:12px;color:#7f92a8;}";
-  page += ".settings-block{margin-top:18px;padding-top:16px;border-top:1px solid #2b3545;}";
-  page += ".settings-block:first-of-type{margin-top:0;padding-top:0;border-top:none;}";
-  page += ".settings-title{display:block;margin:0 0 6px 0;font-size:14px;font-weight:700;color:#edf2f7;letter-spacing:.02em;}";
-  page += ".settings-desc{margin:0 0 12px 0;font-size:12px;color:#8ea3ba;line-height:1.45;}";
-  page += ".color-stack{display:grid;gap:12px;}";
-  page += ".color-row{display:grid;grid-template-columns:120px 1fr;gap:12px;align-items:center;}";
-  page += ".color-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;}";
-  page += ".color-meta .label{margin:0;color:#dbe7f5;}";
-  page += ".color-value{font-size:12px;color:#8ea3ba;white-space:nowrap;}";
-  page += ".swatch-row{display:flex;flex-wrap:wrap;gap:8px;}";
-  page += ".swatch{width:22px;height:22px;border-radius:999px;border:1px solid rgba(255,255,255,.18);cursor:pointer;position:relative;box-sizing:border-box;}";
-  page += ".swatch input{display:none;}";
-  page += ".swatch.active{box-shadow:0 0 0 2px #67e8f9, 0 0 0 5px rgba(103,232,249,.18);}";
-  page += ".swatch.active::after{content:'';position:absolute;inset:5px;border-radius:999px;border:1px solid rgba(0,16,24,.45);}";
-  page += ".timer-slot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px;}";
-  page += ".timer-slot{border:1px solid #334155;border-radius:12px;background:#0b1220;padding:10px 10px 12px 10px;}";
-  page += ".timer-slot-head{font-size:12px;color:#8ea3ba;margin-bottom:8px;font-weight:600;}";
-  page += ".timer-slot-input{display:flex;align-items:center;gap:8px;}";
-  page += ".timer-slot input{padding:10px 12px;text-align:center;font-weight:700;}";
-  page += ".timer-unit{font-size:12px;color:#8ea3ba;white-space:nowrap;}";
-  page += "@media(max-width:820px){.layout{grid-template-columns:1fr;}.grid,.grid-3,.timer-slot-grid{grid-template-columns:1fr;}.color-row{grid-template-columns:1fr;}}";
-  page += "</style></head><body><div class='wrap'>";
-  page += "<div class='hero'>";
-  page += "<h1>Deskbuddy</h1>";
-  page += "<p>Shape Deskbuddy into your own desk companion with widgets, notes, colors, and smart daily tools.</p>";
-  page += "<div class='ip'>ESP IP: ";
+  String page; page.reserve(21000);
+  page += "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Deskbuddy</title><style>";
+  page += ":root{color-scheme:dark;}body{margin:0;background:linear-gradient(180deg,#0b1018 0%,#111827 100%);color:#edf2f7;font-family:system-ui,sans-serif;}.wrap{max-width:980px;margin:0 auto;padding:28px 16px 36px;}.hero{margin-bottom:18px;padding:18px 20px;border:1px solid #243244;border-radius:20px;background:linear-gradient(135deg,#111927 0%,#172235 100%);box-shadow:0 10px 30px rgba(0,0,0,.22);}.hero h1{font-size:30px;margin:0 0 8px 0;}.hero p{margin:0;color:#a9b7c9;font-size:14px;}.ip{display:inline-block;margin-top:14px;padding:8px 12px;border-radius:999px;background:#0b1220;border:1px solid #334155;color:#dbe7f5;font-size:13px;}.layout{display:grid;grid-template-columns:1.15fr .85fr;gap:16px;align-items:start;}.stack{display:grid;gap:16px;}.panel{background:#171b22;border:1px solid #2d3748;border-radius:18px;padding:18px;margin:0;}.panel-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;background:none;border:none;color:#edf2f7;padding:0;margin:0;cursor:pointer;text-align:left;}.panel-toggle:hover{color:#ffffff;}.panel-toggle h2{flex:1;}.panel-chevron{font-size:18px;color:#8ea3ba;transition:transform .18s ease;}.panel.collapsed .panel-chevron{transform:rotate(-90deg);}.panel-body{margin-top:12px;}.panel.collapsed .panel-body{display:none;}.panel h2{margin:0 0 6px 0;font-size:18px;}.panel p{margin:0 0 14px 0;color:#94a3b8;font-size:13px;line-height:1.45;}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}.label{display:block;font-size:13px;margin:0 0 8px 0;color:#a0aec0;font-weight:600;}textarea,input,select{width:100%;border-radius:12px;border:1px solid #334155;background:#0b1220;color:#edf2f7;padding:12px;box-sizing:border-box;font:inherit;}textarea{min-height:170px;resize:vertical;}button{margin-top:18px;background:#38bdf8;border:none;color:#001018;padding:13px 18px;border-radius:12px;font-weight:800;cursor:pointer;font:inherit;}.muted{font-size:13px;color:#94a3b8;line-height:1.45;}.footer-note{margin-top:10px;font-size:12px;color:#7f92a8;}.settings-block{margin-top:18px;padding-top:16px;border-top:1px solid #2b3545;}.settings-block:first-of-type{margin-top:0;padding-top:0;border-top:none;}.settings-title{display:block;margin:0 0 6px 0;font-size:14px;font-weight:700;color:#edf2f7;letter-spacing:.02em;}.settings-desc{margin:0 0 12px 0;font-size:12px;color:#8ea3ba;line-height:1.45;}.color-stack{display:grid;gap:12px;}.color-row{display:grid;grid-template-columns:120px 1fr;gap:12px;align-items:center;}.color-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;}.color-meta .label{margin:0;color:#dbe7f5;}.color-value{font-size:12px;color:#8ea3ba;white-space:nowrap;}.swatch-row{display:flex;flex-wrap:wrap;gap:8px;}.swatch{width:22px;height:22px;border-radius:999px;border:1px solid rgba(255,255,255,.18);cursor:pointer;position:relative;box-sizing:border-box;}.swatch input{display:none;}.swatch.active{box-shadow:0 0 0 2px #67e8f9, 0 0 0 5px rgba(103,232,249,.18);}.swatch.active::after{content:'';position:absolute;inset:5px;border-radius:999px;border:1px solid rgba(0,16,24,.45);}.timer-slot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px;}.timer-slot{border:1px solid #334155;border-radius:12px;background:#0b1220;padding:10px 10px 12px 10px;}.timer-slot-head{font-size:12px;color:#8ea3ba;margin-bottom:8px;font-weight:600;}.timer-slot-input{display:flex;align-items:center;gap:8px;}.timer-slot input{padding:10px 12px;text-align:center;font-weight:700;}.timer-unit{font-size:12px;color:#8ea3ba;white-space:nowrap;}@media(max-width:820px){.layout{grid-template-columns:1fr;}.grid,.grid-3,.timer-slot-grid{grid-template-columns:1fr;}.color-row{grid-template-columns:1fr;}}</style></head><body><div class='wrap'><div class='hero'><h1>Deskbuddy</h1><p>Shape Deskbuddy into your own desk companion with widgets, notes, colors, and smart daily tools.</p><div class='ip'>ESP IP: ";
   page += WiFi.localIP().toString();
-  page += "</div></div>";
-
-  page += "<form method='POST' action='/save'>";
-  page += "<div class='layout'><div class='stack'>";
-
-  page += "<div class='panel' data-panel='notes'>";
-  page += "<button type='button' class='panel-toggle' aria-expanded='true'><h2>Notes</h2><span class='panel-chevron'>&#9662;</span></button>";
-  page += "<div class='panel-body'>";
-  page += "<p>Short notes synced to the device.</p>";
-  page += "<label class='label'>Notes</label>";
-  page += "<textarea name='notes' maxlength='700'>";
+  page += "</div></div><form method='POST' action='/save'><div class='layout'><div class='stack'><div class='panel' data-panel='notes'><button type='button' class='panel-toggle' aria-expanded='true'><h2>Notes</h2><span class='panel-chevron'>&#9662;</span></button><div class='panel-body'><p>Short notes synced to the device.</p><label class='label'>Notes</label><textarea name='notes' maxlength='700'>";
   page += htmlEscape(notesText);
-  page += "</textarea>";
-  page += "<div class='muted'>Saved notes show up right away.</div>";
-  page += "</div></div>";
-
-  page += "<div class='panel' data-panel='theme'>";
-  page += "<button type='button' class='panel-toggle' aria-expanded='true'><h2>Theme and color</h2><span class='panel-chevron'>&#9662;</span></button>";
-  page += "<div class='panel-body'>";
-  page += "<p>Colors and visual style for the display.</p>";
-  page += "<div class='grid'>";
-
-  page += "<div style='grid-column:1 / -1;' class='color-stack'>";
-
-  page += "<div class='color-row'><div class='color-meta'><label class='label'>Accent</label><span class='color-value' id='accent-value'>";
+  page += "</textarea><div class='muted'>Saved notes show up right away.</div></div></div><div class='panel' data-panel='theme'><button type='button' class='panel-toggle' aria-expanded='true'><h2>Theme and color</h2><span class='panel-chevron'>&#9662;</span></button><div class='panel-body'><p>Colors and visual style for the display.</p><div class='grid'><div style='grid-column:1 / -1;' class='color-stack'><div class='color-row'><div class='color-meta'><label class='label'>Accent</label><span class='color-value' id='accent-value'>";
   page += accent;
   page += "</span></div><div class='swatch-row'>";
   page += "<label class='swatch" + String(accent=="standard"?" active":"") + "' style='background:" + accentPreviewCss("standard") + ";'><input type='radio' name='accent' value='standard'" + String(accent=="standard"?" checked":"") + "></label>";
@@ -2289,9 +2010,7 @@ void handleRoot() {
   page += "<label class='swatch" + String(accent=="orange"?" active":"") + "' style='background:" + accentPreviewCss("orange") + ";'><input type='radio' name='accent' value='orange'" + String(accent=="orange"?" checked":"") + "></label>";
   page += "<label class='swatch" + String(accent=="amber"?" active":"") + "' style='background:" + accentPreviewCss("amber") + ";'><input type='radio' name='accent' value='amber'" + String(accent=="amber"?" checked":"") + "></label>";
   page += "<label class='swatch" + String(accent=="red"?" active":"") + "' style='background:" + accentPreviewCss("red") + ";'><input type='radio' name='accent' value='red'" + String(accent=="red"?" checked":"") + "></label>";
-  page += "</div></div>";
-
-  page += "<div class='color-row'><div class='color-meta'><label class='label'>Text</label><span class='color-value' id='text-value'>";
+  page += "</div></div><div class='color-row'><div class='color-meta'><label class='label'>Text</label><span class='color-value' id='text-value'>";
   page += txt;
   page += "</span></div><div class='swatch-row'>";
   page += "<label class='swatch" + String(txt=="standard"?" active":"") + "' style='background:" + accentPreviewCss("standard") + ";'><input type='radio' name='text' value='standard'" + String(txt=="standard"?" checked":"") + "></label>";
@@ -2306,9 +2025,7 @@ void handleRoot() {
   page += "<label class='swatch" + String(txt=="orange"?" active":"") + "' style='background:" + accentPreviewCss("orange") + ";'><input type='radio' name='text' value='orange'" + String(txt=="orange"?" checked":"") + "></label>";
   page += "<label class='swatch" + String(txt=="amber"?" active":"") + "' style='background:" + accentPreviewCss("amber") + ";'><input type='radio' name='text' value='amber'" + String(txt=="amber"?" checked":"") + "></label>";
   page += "<label class='swatch" + String(txt=="red"?" active":"") + "' style='background:" + accentPreviewCss("red") + ";'><input type='radio' name='text' value='red'" + String(txt=="red"?" checked":"") + "></label>";
-  page += "</div></div>";
-
-  page += "<div class='color-row'><div class='color-meta'><label class='label'>Theme</label><span class='color-value' id='bg-value'>";
+  page += "</div></div><div class='color-row'><div class='color-meta'><label class='label'>Theme</label><span class='color-value' id='bg-value'>";
   page += bg;
   page += "</span></div><div class='swatch-row'>";
   page += "<label class='swatch" + String(bg=="slate"?" active":"") + "' style='background:" + themePreviewCss("slate") + ";'><input type='radio' name='bg' value='slate'" + String(bg=="slate"?" checked":"") + "></label>";
@@ -2321,59 +2038,13 @@ void handleRoot() {
   page += "<label class='swatch" + String(bg=="graphite"?" active":"") + "' style='background:" + themePreviewCss("graphite") + ";'><input type='radio' name='bg' value='graphite'" + String(bg=="graphite"?" checked":"") + "></label>";
   page += "<label class='swatch" + String(bg=="garnet"?" active":"") + "' style='background:" + themePreviewCss("garnet") + ";'><input type='radio' name='bg' value='garnet'" + String(bg=="garnet"?" checked":"") + "></label>";
   page += "<label class='swatch" + String(bg=="ochre"?" active":"") + "' style='background:" + themePreviewCss("ochre") + ";'><input type='radio' name='bg' value='ochre'" + String(bg=="ochre"?" checked":"") + "></label>";
-  page += "</div></div>";
-
-  page += "</div>";
-
-  page += "</div></div></div>";
-
-  page += "<div class='panel' data-panel='settings'>";
-  page += "<button type='button' class='panel-toggle' aria-expanded='true'><h2>Settings</h2><span class='panel-chevron'>&#9662;</span></button>";
-  page += "<div class='panel-body'>";
-  page += "<p>Core behavior and timer setup.</p>";
-  page += "<div class='settings-block'>";
-  page += "<span class='settings-title'>General</span>";
-  page += "<div class='grid'>";
-  page += "<div><label class='label'>Buddy nickname</label><input name='nickname' maxlength='24' value='" + htmlEscape(nickname) + "'></div>";
-  page += "<div><label class='label'>Auto sleep interval</label><select name='sleepMin'>";
-  page += "<option value='0'"  + String(sleepIntervalMin==0?" selected":"")  + ">Never</option>";
-  page += "<option value='1'"  + String(sleepIntervalMin==1?" selected":"")  + ">1 minute</option>";
-  page += "<option value='5'"  + String(sleepIntervalMin==5?" selected":"")  + ">5 minutes</option>";
-  page += "<option value='10'" + String(sleepIntervalMin==10?" selected":"") + ">10 minutes</option>";
-  page += "<option value='30'" + String(sleepIntervalMin==30?" selected":"") + ">30 minutes</option>";
-  page += "<option value='60'" + String(sleepIntervalMin==60?" selected":"") + ">1 hour</option>";
-  page += "</select><div class='muted' style='margin-top:8px;'>Sleep dims the screen first, then turns it fully off after 60 seconds.</div></div>";
-  page += "<div><label class='label'>Measurement system</label><select name='units'>";
-  page += "<option value='metric'"   + String(units=="metric"?" selected":"")   + ">Celsius / mm</option>";
-  page += "<option value='imperial'" + String(units=="imperial"?" selected":"") + ">Fahrenheit / inches</option>";
-  page += "</select></div>";
-  page += "<div><label class='label'>Date format</label><select name='region'>";
-  page += "<option value='europe'" + String(region=="europe"?" selected":"") + ">European: dd.mm.yyyy</option>";
-  page += "<option value='us'" + String(region=="us"?" selected":"") + ">US: mm/dd/yyyy</option>";
-  page += "</select></div>";
-  page += "<div><label class='label'>Time zone</label><select name='tz'>";
+  page += "</div></div></div></div></div></div><div class='panel' data-panel='settings'><button type='button' class='panel-toggle' aria-expanded='true'><h2>Settings</h2><span class='panel-chevron'>&#9662;</span></button><div class='panel-body'><p>Core behavior and timer setup.</p><div class='settings-block'><span class='settings-title'>General</span><div class='grid'><div><label class='label'>Buddy nickname</label><input name='nickname' maxlength='24' value='" + htmlEscape(nickname) + "'></div><div><label class='label'>Auto sleep interval</label><select name='sleepMin'><option value='0'" + String(sleepIntervalMin==0?" selected":"") + ">Never</option><option value='1'" + String(sleepIntervalMin==1?" selected":"") + ">1 minute</option><option value='5'" + String(sleepIntervalMin==5?" selected":"") + ">5 minutes</option><option value='10'" + String(sleepIntervalMin==10?" selected":"") + ">10 minutes</option><option value='30'" + String(sleepIntervalMin==30?" selected":"") + ">30 minutes</option><option value='60'" + String(sleepIntervalMin==60?" selected":"") + ">1 hour</option></select><div class='muted' style='margin-top:8px;'>Sleep dims the screen first, then turns it fully off after 60 seconds.</div></div><div><label class='label'>Measurement system</label><select name='units'><option value='metric'" + String(units=="metric"?" selected":"") + ">Celsius / mm</option><option value='imperial'" + String(units=="imperial"?" selected":"") + ">Fahrenheit / inches</option></select></div><div><label class='label'>Date format</label><select name='region'><option value='europe'" + String(region=="europe"?" selected":"") + ">European: dd.mm.yyyy</option><option value='us'" + String(region=="us"?" selected":"") + ">US: mm/dd/yyyy</option></select></div><div><label class='label'>Time zone</label><select name='tz'>";
   appendTimezoneOptions(page, tz);
-  page += "</select></div>";
-  page += "</div>";
-  page += "</div>";
-  page += "<div class='settings-block'><span class='settings-title'>Timer</span><div class='settings-desc'>Choose the six quick timers shown in the popup menu.</div><div class='timer-slot-grid'>";
+  page += "</select></div></div></div><div class='settings-block'><span class='settings-title'>Timer</span><div class='settings-desc'>Choose the six quick timers shown in the popup menu.</div><div class='timer-slot-grid'>";
   for (int i = 0; i < 6; i++) {
     page += "<div class='timer-slot'><div class='timer-slot-head'>Slot " + String(i + 1) + "</div><div class='timer-slot-input'><input type='number' min='1' max='180' name='timer" + String(i) + "' value='" + String(timerPresetMin[i]) + "'><span class='timer-unit'>min</span></div></div>";
   }
-  page += "</div>";
-  page += "<div style='margin-top:14px;'><span class='settings-title'>Alert behavior</span><label style='display:flex;align-items:center;gap:10px;color:#edf2f7;'><input type='checkbox' name='flashMode' value='1'" + String(flashMode ? " checked" : "") + " style='width:auto;'>Flash screen when timer ends</label></div></div>";
-  page += "<div class='settings-block'><span class='settings-title'>Location</span><div class='settings-desc'>Used for weather data and sun times.</div><div class='grid-3'>";
-  page += "<div><label class='label'>Location name</label><input name='locname' value='" + htmlEscape(locationName) + "'></div>";
-  page += "<div><label class='label'>Latitude</label><input name='lat' value='" + String(LAT, 6) + "'></div>";
-  page += "<div><label class='label'>Longitude</label><input name='lng' value='" + String(LNG, 6) + "'></div>";
-  page += "</div><div class='footer-note'>Example Berlin: latitude 52.5200, longitude 13.4050.</div></div>";
-  page += "</div></div>";
-
-  page += "<div class='panel' data-panel='widgets'>";
-  page += "<button type='button' class='panel-toggle' aria-expanded='true'><h2>Widget Customization</h2><span class='panel-chevron'>&#9662;</span></button>";
-  page += "<div class='panel-body'>";
-  page += "<p>Choose which widgets appear in the four Home slots below the clock card.</p>";
-  page += "<div class='grid'>";
+  page += "</div><div style='margin-top:14px;'><span class='settings-title'>Alert behavior</span><label style='display:flex;align-items:center;gap:10px;color:#edf2f7;'><input type='checkbox' name='flashMode' value='1'" + String(flashMode ? " checked" : "") + " style='width:auto;'>Flash screen when timer ends</label></div></div><div class='settings-block'><span class='settings-title'>Location</span><div class='settings-desc'>Used for weather data and sun times.</div><div class='grid-3'><div><label class='label'>Location name</label><input name='locname' value='" + htmlEscape(locationName) + "'></div><div><label class='label'>Latitude</label><input name='lat' value='" + String(LAT, 6) + "'></div><div><label class='label'>Longitude</label><input name='lng' value='" + String(LNG, 6) + "'></div></div><div class='footer-note'>Example Berlin: latitude 52.5200, longitude 13.4050.</div></div></div></div><div class='panel' data-panel='widgets'><button type='button' class='panel-toggle' aria-expanded='true'><h2>Widget Customization</h2><span class='panel-chevron'>&#9662;</span></button><div class='panel-body'><p>Choose which widgets appear in the four Home slots below the clock card.</p><div class='grid'>";
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     page += "<div><label class='label'>";
     page += homeSlotLabel(i);
@@ -2383,45 +2054,9 @@ void handleRoot() {
     appendHomeWidgetOptions(page, homeSlotKeys[i]);
     page += "</select></div>";
   }
-  page += "</div>";
-  page += "</div></div>";
-
-  page += "</div><div class='stack'>";
-
-  page += "<button type='submit'>Save to Deskbuddy</button>";
-  page += "</div></div></form>";
-  page += "<script>";
-  page += "var colorNames={accent:{standard:'Standard',ice:'Ice',white:'White',cyan:'Cyan',mint:'Mint',green:'Green',blue:'Blue',purple:'Purple',pink:'Pink',orange:'Orange',amber:'Amber',red:'Red'},text:{standard:'Standard',ice:'Ice',white:'White',cyan:'Cyan',mint:'Mint',green:'Green',blue:'Blue',purple:'Purple',pink:'Pink',orange:'Orange',amber:'Amber',red:'Red'},bg:{slate:'Slate',deep:'Deep black',nordic:'Nordic blue',forest:'Forest',coffee:'Coffee',soft:'Soft dark',midnight:'Midnight',graphite:'Graphite',garnet:'Garnet',ochre:'Ochre'}};";
-  page += "var panelStorageKey='deskbuddy-panel-state-v1';";
-  page += "document.querySelectorAll('.swatch input').forEach(function(input){";
-  page += "input.addEventListener('change',function(){";
-  page += "document.querySelectorAll('.swatch input[name=\"'+input.name+'\"]').forEach(function(peer){";
-  page += "peer.closest('.swatch').classList.toggle('active', peer.checked);";
-  page += "});";
-  page += "var valueEl=document.getElementById(input.name+'-value');";
-  page += "if(valueEl&&colorNames[input.name]&&colorNames[input.name][input.value]){valueEl.textContent=colorNames[input.name][input.value];}";
-  page += "});";
-  page += "});";
-  page += "function readPanelState(){try{return JSON.parse(localStorage.getItem(panelStorageKey)||'{}');}catch(e){return {};}}";
-  page += "function writePanelState(state){localStorage.setItem(panelStorageKey,JSON.stringify(state));}";
-  page += "function applyPanelState(panel,collapsed){panel.classList.toggle('collapsed',collapsed);var btn=panel.querySelector('.panel-toggle');if(btn){btn.setAttribute('aria-expanded',collapsed?'false':'true');}}";
-  page += "var savedPanelState=readPanelState();";
-  page += "document.querySelectorAll('.panel[data-panel]').forEach(function(panel){";
-  page += "var panelId=panel.getAttribute('data-panel');";
-  page += "if(Object.prototype.hasOwnProperty.call(savedPanelState,panelId)){applyPanelState(panel,!!savedPanelState[panelId]);}";
-  page += "});";
-  page += "document.querySelectorAll('.panel-toggle').forEach(function(btn){";
-  page += "btn.addEventListener('click',function(){";
-  page += "var panel=btn.closest('.panel');";
-  page += "var collapsed=!panel.classList.contains('collapsed');";
-  page += "applyPanelState(panel,collapsed);";
-  page += "var state=readPanelState();";
-  page += "var panelId=panel.getAttribute('data-panel');";
-  page += "if(panelId){state[panelId]=collapsed;writePanelState(state);}";
-  page += "});";
-  page += "});";
-  page += "</script>";
-  page += "</div></body></html>";
+  page += "</div></div></div></div><div class='stack'><button type='submit'>Save to Deskbuddy</button></div></div></form><script>";
+  page += "var colorNames={accent:{standard:'Standard',ice:'Ice',white:'White',cyan:'Cyan',mint:'Mint',green:'Green',blue:'Blue',purple:'Purple',pink:'Pink',orange:'Orange',amber:'Amber',red:'Red'},text:{standard:'Standard',ice:'Ice',white:'White',cyan:'Cyan',mint:'Mint',green:'Green',blue:'Blue',purple:'Purple',pink:'Pink',orange:'Orange',amber:'Amber',red:'Red'},bg:{slate:'Slate',deep:'Deep black',nordic:'Nordic blue',forest:'Forest',coffee:'Coffee',soft:'Soft dark',midnight:'Midnight',graphite:'Graphite',garnet:'Garnet',ochre:'Ochre'}};var panelStorageKey='deskbuddy-panel-state-v1';document.querySelectorAll('.swatch input').forEach(function(input){input.addEventListener('change',function(){document.querySelectorAll('.swatch input[name=\"'+input.name+'\"]').forEach(function(peer){peer.closest('.swatch').classList.toggle('active', peer.checked);});var valueEl=document.getElementById(input.name+'-value');if(valueEl&&colorNames[input.name]&&colorNames[input.name][input.value]){valueEl.textContent=colorNames[input.name][input.value];}});});function readPanelState(){try{return JSON.parse(localStorage.getItem(panelStorageKey)||'{}');}catch(e){return {};}}function writePanelState(state){localStorage.setItem(panelStorageKey,JSON.stringify(state));}function applyPanelState(panel,collapsed){panel.classList.toggle('collapsed',collapsed);var btn=panel.querySelector('.panel-toggle');if(btn){btn.setAttribute('aria-expanded',collapsed?'false':'true');}}var savedPanelState=readPanelState();document.querySelectorAll('.panel[data-panel]').forEach(function(panel){var panelId=panel.getAttribute('data-panel');if(Object.prototype.hasOwnProperty.call(savedPanelState,panelId)){applyPanelState(panel,!!savedPanelState[panelId]);}});document.querySelectorAll('.panel-toggle').forEach(function(btn){btn.addEventListener('click',function(){var panel=btn.closest('.panel');var collapsed=!panel.classList.contains('collapsed');applyPanelState(panel,collapsed);var state=readPanelState();var panelId=panel.getAttribute('data-panel');if(panelId){state[panelId]=collapsed;writePanelState(state);}});});";
+  page += "</script></div></body></html>";
 
   server.send(200, "text/html; charset=utf-8", page);
 }
@@ -2436,6 +2071,7 @@ void handleSave() {
   String newTz     = server.hasArg("tz") ? server.arg("tz") : timezoneKey;
   String newLoc    = server.hasArg("locname") ? server.arg("locname") : locationName;
   String newNickname = server.hasArg("nickname") ? server.arg("nickname") : buddyNickname;
+  
   HomeWidgetType newHomeSlots[HOME_SLOT_COUNT];
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     String key = String("homeSlot") + String(i);
@@ -2446,10 +2082,7 @@ void handleSave() {
   float newLat = server.hasArg("lat") ? server.arg("lat").toFloat() : LAT;
   float newLng = server.hasArg("lng") ? server.arg("lng").toFloat() : LNG;
 
-  newNotes.trim();
-  newLoc.trim();
-  newNickname.trim();
-
+  newNotes.trim(); newLoc.trim(); newNickname.trim();
   if (newNotes.length() == 0) newNotes = "No notes yet.";
   if (newNotes.length() > 700) newNotes = newNotes.substring(0, 700);
   if (newLoc.length() == 0) newLoc = "Unknown";
@@ -2462,23 +2095,12 @@ void handleSave() {
   sleepIntervalMin = constrain(newSleepMin, 0, 120);
   bool newFlashMode = server.hasArg("flashMode");
 
-  bool locationChanged =
-    (fabsf(newLat - LAT) > 0.0001f) ||
-    (fabsf(newLng - LNG) > 0.0001f) ||
-    (newLoc != locationName);
+  bool locationChanged = (fabsf(newLat - LAT) > 0.0001f) || (fabsf(newLng - LNG) > 0.0001f) || (newLoc != locationName);
 
-  notesText = newNotes;
-  buddyNickname = newNickname;
-  locationName = newLoc;
-  LAT = newLat;
-  LNG = newLng;
-  unitKey = newUnits;
-  regionFormatKey = newRegion;
-  timezoneKey = newTz;
+  notesText = newNotes; buddyNickname = newNickname; locationName = newLoc;
+  LAT = newLat; LNG = newLng; unitKey = newUnits; regionFormatKey = newRegion; timezoneKey = newTz;
   flashModeEnabled = newFlashMode;
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    homeWidgetSlots[i] = newHomeSlots[i];
-  }
+  for (int i = 0; i < HOME_SLOT_COUNT; i++) homeWidgetSlots[i] = newHomeSlots[i];
 
   for (int i = 0; i < 6; i++) {
     String key = String("timer") + String(i);
@@ -2487,19 +2109,12 @@ void handleSave() {
     timerPresetMin[i] = sanitizeTimerMinutes(nextValue);
   }
 
-  prefs.putString("notes", notesText);
-  prefs.putString("accent", newAccent);
-  prefs.putString("bg", newBg);
-  prefs.putString("text", newText);
-  prefs.putString("units", unitKey);
-  prefs.putString("region", regionFormatKey);
-  prefs.putString("tz", timezoneKey);
-  prefs.putString("nickname", buddyNickname);
-  prefs.putString("locname", locationName);
-  prefs.putFloat("lat", LAT);
-  prefs.putFloat("lng", LNG);
-  prefs.putInt("sleepMin", sleepIntervalMin);
-  prefs.putBool("flashMode", flashModeEnabled);
+  prefs.putString("notes", notesText); prefs.putString("accent", newAccent);
+  prefs.putString("bg", newBg); prefs.putString("text", newText);
+  prefs.putString("units", unitKey); prefs.putString("region", regionFormatKey);
+  prefs.putString("tz", timezoneKey); prefs.putString("nickname", buddyNickname);
+  prefs.putString("locname", locationName); prefs.putFloat("lat", LAT); prefs.putFloat("lng", LNG);
+  prefs.putInt("sleepMin", sleepIntervalMin); prefs.putBool("flashMode", flashModeEnabled);
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     String key = String("homeSlot") + String(i);
     prefs.putString(key.c_str(), homeWidgetKey(homeWidgetSlots[i]));
@@ -2514,28 +2129,13 @@ void handleSave() {
   applyDeviceTimezoneByKey(timezoneKey);
   if (!sleepDimmed && !sleepOff) setBacklight(BL_FULL);
 
-  notesDirty = true;
-  pageDirty = true;
-  dataDirty = true;
+  notesDirty = true; pageDirty = true; dataDirty = true;
+  cacheClock = ""; cacheHomeEmpty1 = ""; cacheHomeEmpty2 = "";
+  cacheFocusTimer = ""; cacheTimerMenu = ""; cacheTimerDone = "";
+  for (int i = 0; i < HOME_SLOT_COUNT; i++) cacheHomeSlots[i] = "";
 
-  cacheClock = "";
-  cacheHomeEmpty1 = "";
-  cacheHomeEmpty2 = "";
-  cacheFocusTimer = "";
-  cacheTimerMenu = "";
-  cacheTimerDone = "";
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    cacheHomeSlots[i] = "";
-  }
-
-  lastTempText = "";
-  lastRainText = "";
-  lastKpText = "";
-  lastKpLevelText = "";
-  lastWindText = "";
-  lastWindDirText = "";
-  lastNextSunLabel = "";
-  lastNextSunTime = "";
+  lastTempText = ""; lastRainText = ""; lastKpText = ""; lastKpLevelText = "";
+  lastWindText = ""; lastWindDirText = ""; lastNextSunLabel = ""; lastNextSunTime = "";
   lastUptimeText = "";
 
   if (locationChanged) resetDataCaches();
@@ -2557,54 +2157,37 @@ void waitForNtpTime() {
   time_t now = time(nullptr);
   unsigned long t0 = millis();
   while (now < 1700000000 && millis() - t0 < 10000) {
-    delay(200);
-    now = time(nullptr);
+    delay(200); now = time(nullptr);
   }
 }
 
 void beginWiFiConnect() {
   if (!wifiEnabled) {
-    WiFi.disconnect(true, true);
-    WiFi.mode(WIFI_OFF);
-    wifiConnectInProgress = false;
-    return;
+    WiFi.disconnect(true, true); WiFi.mode(WIFI_OFF); wifiConnectInProgress = false; return;
   }
-
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
+  WiFi.mode(WIFI_STA); WiFi.setSleep(false);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  wifiConnectInProgress = true;
-  wifiConnectStartedMs = millis();
+  wifiConnectInProgress = true; wifiConnectStartedMs = millis();
 }
 
 void connectWiFi(bool waitForConnection = true) {
   beginWiFiConnect();
   if (!waitForConnection) return;
-
   unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
-    delay(200);
-  }
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) { delay(200); }
   wifiConnectInProgress = false;
 }
 
 void updateWiFiConnectionState() {
   if (!wifiEnabled || !wifiConnectInProgress) return;
-
   wl_status_t status = WiFi.status();
   if (status == WL_CONNECTED) {
     wifiConnectInProgress = false;
-    ensureSunTimesForToday();
-    ensureWeather();
-    ensureKpIndex();
-    dataDirty = true;
-    pageDirty = true;
-    return;
+    ensureSunTimesForToday(); ensureWeather(); ensureKpIndex();
+    dataDirty = true; pageDirty = true; return;
   }
-
   if (millis() - wifiConnectStartedMs >= WIFI_CONNECT_TIMEOUT_MS) {
-    wifiConnectInProgress = false;
-    pageDirty = true;
+    wifiConnectInProgress = false; pageDirty = true;
   }
 }
 
@@ -2613,20 +2196,15 @@ void setWifiEnabled(bool enabled) {
   prefs.putBool("wifiEnabled", wifiEnabled);
 
   if (!wifiEnabled) {
-    wifiConnectInProgress = false;
-    WiFi.disconnect(true, true);
-    WiFi.mode(WIFI_OFF);
+    wifiConnectInProgress = false; WiFi.disconnect(true, true); WiFi.mode(WIFI_OFF);
   } else {
     beginWiFiConnect();
   }
-
-  dataDirty = true;
-  pageDirty = true;
+  dataDirty = true; pageDirty = true;
 }
 
 void setup() {
   Serial.begin(115200);
-
   pinMode(BACKLIGHT_PIN, OUTPUT);
   analogWrite(BACKLIGHT_PIN, BL_FULL);
   pinMode(27, OUTPUT);
@@ -2635,7 +2213,6 @@ void setup() {
   loadStoredSettings();
   setBacklight(BL_FULL);
   lastInteractionMs = millis();
-
   delay(200);
 
   tft.init();
@@ -2657,26 +2234,17 @@ void setup() {
   connectWiFi(true);
 
   tft.drawString("Syncing time...", 10, 58, 2);
-  configTzTime(timezonePosixByKey(timezoneKey),
-               "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+  configTzTime(timezonePosixByKey(timezoneKey), "pool.ntp.org", "time.google.com", "time.google.com");
   waitForNtpTime();
 
-  ensureSunTimesForToday();
-  ensureWeather();
-  ensureKpIndex();
-
+  ensureSunTimesForToday(); ensureWeather(); ensureKpIndex();
   setupWebServer();
 
-  pageDirty = true;
-  dataDirty = true;
-  notesDirty = true;
-
+  pageDirty = true; dataDirty = true; notesDirty = true;
   drawCurrentPageFull();
   updateCurrentPageDynamic();
 
-  lastClockTick = millis();
-  lastDataTick = millis();
-
+  lastClockTick = millis(); lastDataTick = millis();
   Serial.print("Deskbuddy web: http://");
   Serial.println(WiFi.localIP());
 }
@@ -2694,59 +2262,42 @@ void loop() {
 
     if (sleepOff) {
       if (manualDimMode) {
-        sleepOff = false;
-        sleepDimmed = true;
-        setBacklight(BL_DIM);
-        pageDirty = true;
+        sleepOff = false; sleepDimmed = true; setBacklight(BL_DIM); pageDirty = true;
       } else {
         wakeDisplay();
       }
       return;
     }
 
-    if (handleTimerDoneDialogTouch(tx, ty)) {
-      return;
-    }
+    if (handleTimerDoneDialogTouch(tx, ty)) return;
 
-    if (tx >= SCREEN_W - 36 && ty <= TOPBAR_H) {
-      toggleSleepMode();
-      pageDirty = true;
+    if (tx >= SCREEN_W - 40 && ty <= TOPBAR_H) {
+      toggleSleepMode(); pageDirty = true;
     } else {
       if (sleepDimmed) {
         if (!manualDimMode) {
           wakeDisplay();
         } else {
-          if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
-            handleNavTouch(tx, ty);
-          }
+          if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) handleNavTouch(tx, ty);
         }
       } else {
-        if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
-          handleNavTouch(tx, ty);
-        }
+        if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) handleNavTouch(tx, ty);
       }
     }
   }
 
   if (millis() - lastDataTick >= DATA_TICK_MS) {
     lastDataTick = millis();
-    ensureSunTimesForToday();
-    ensureWeather();
-    ensureKpIndex();
+    ensureSunTimesForToday(); ensureWeather(); ensureKpIndex();
   }
 
   if (pageDirty || lastDrawnPage != currentPage) {
-    drawCurrentPageFull();
-    updateCurrentPageDynamic();
-    pageDirty = false;
-    dataDirty = false;
+    drawCurrentPageFull(); updateCurrentPageDynamic();
+    pageDirty = false; dataDirty = false;
   }
 
   if (millis() - lastClockTick >= CLOCK_TICK_MS) {
-    lastClockTick = millis();
-    updateCurrentPageDynamic();
-    dataDirty = false;
+    lastClockTick = millis(); updateCurrentPageDynamic(); dataDirty = false;
   }
-
   delay(10);
 }
