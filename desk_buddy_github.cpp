@@ -452,7 +452,7 @@ static time_t lastSyncTime = 0;
 // =========================================================
 // SLEEP / BACKLIGHT
 // =========================================================
-const int BACKLIGHT_PIN = 21;
+const int BACKLIGHT_PIN = 27;
 
 bool sleepDimmed = false;
 bool sleepOff = false;
